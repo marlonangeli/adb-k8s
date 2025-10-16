@@ -1,0 +1,14 @@
+controller:
+  replicaCount: 2
+  publishService: { enabled: true }
+  service:
+    type: LoadBalancer
+    loadBalancerIP: ${INGRESS_VIP}
+    annotations:
+      metallb.universe.tf/address-pool: pool-bridge
+    externalTrafficPolicy: Local
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits:   { cpu: 500m, memory: 512Mi }
+  livenessProbe: { initialDelaySeconds: 10, timeoutSeconds: 10, failureThreshold: 5 }
+  readinessProbe:{ initialDelaySeconds: 10, timeoutSeconds: 10, failureThreshold: 5 }

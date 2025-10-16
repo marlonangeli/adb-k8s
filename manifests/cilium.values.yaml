@@ -1,0 +1,2 @@
+# Placeholder para personalizar instalação do Cilium via Helm, caso prefira chart.
+# Os scripts utilizam o CLI por padrão.
