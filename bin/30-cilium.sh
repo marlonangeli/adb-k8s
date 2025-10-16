@@ -6,12 +6,10 @@ source "$(dirname "$0")/lib.sh"
 STEP="cilium"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
-CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
-curl -L --remote-name-all "https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz"{,.sha256sum}
-sha256sum --check cilium-linux-amd64.tar.gz.sha256sum
-tar -C /usr/local/bin -xzvf cilium-linux-amd64.tar.gz
-rm -f cilium-linux-amd64.tar.gz*
+require_commands kubectl
+ensure_cilium_cli
 
+log "Aplicando Cilium (v1.18.0)"
 cilium install \
   --version v1.18.0 \
   --set kubeProxyReplacement=strict \

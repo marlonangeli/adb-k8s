@@ -6,16 +6,23 @@ source "$(dirname "$0")/lib.sh"
 STEP="ingress-nginx"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
-curl -sL "https://get.helm.sh/helm-$(curl -s https://get.helm.sh/helm-latest-version)-linux-amd64.tar.gz" \
-  | tar -xz && install -m 0755 linux-amd64/helm /usr/local/bin/helm && rm -rf linux-amd64
-
+require_commands kubectl envsubst
+ensure_helm
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
 helm repo update
 kubectl create ns ingress-nginx || true
 
-render_dir=$(mktemp -d)
-envsubst < "${ROOT_DIR}/manifests/ingress-nginx.values.yaml" > "${render_dir}/ingress-nginx.values.yaml"
+values_file=$(render_template "${ROOT_DIR}/manifests/ingress-nginx.values.yaml")
 helm upgrade -i ingress-nginx ingress-nginx/ingress-nginx -n ingress-nginx \
-  -f "${render_dir}/ingress-nginx.values.yaml"
+  -f "${values_file}"
+wait_rollout ingress-nginx deploy ingress-nginx-controller
+
+if ip=$(wait_for_lb_ip ingress-nginx ingress-nginx-controller 300); then
+  save_state_var "ASSIGNED_INGRESS_IP" "${ip}"
+  log "Ingress LoadBalancer IP: ${ip}"
+else
+  log "não foi possível obter o IP do LoadBalancer do ingress dentro do tempo esperado"
+  exit 1
+fi
 
 ok "${STEP}"
