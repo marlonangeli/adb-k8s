@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-all: init-cp cilium metallb ingress rancher observability longhorn vcluster
+all: init-cp cilium metallb ingress cert-manager rancher observability longhorn vcluster
 
 init-cp:
 	@bin/20-kubeadm-init.sh
@@ -13,6 +13,9 @@ metallb:
 
 ingress:
 	@bin/50-ingress-nginx.sh
+
+cert-manager:
+	@bin/55-cert-manager.sh
 
 rancher:
 	@bin/60-rancher.sh

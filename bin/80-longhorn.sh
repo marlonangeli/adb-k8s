@@ -16,21 +16,38 @@ helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
   --set defaultSettings.defaultReplicaCount=2
 
 LONGHORN_HOSTNAME=$(resolve_hostname "${LONGHORN_HOST_OVERRIDE:-}" "longhorn")
+LONGHORN_LOCAL_HOSTNAME=$(local_sslip_host "longhorn")
 save_state_var "LONGHORN_HOSTNAME" "${LONGHORN_HOSTNAME}"
+save_state_var "LONGHORN_LOCAL_HOSTNAME" "${LONGHORN_LOCAL_HOSTNAME}"
+
+INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
+apply_certificate "longhorn-system" "longhorn-tls" "longhorn-tls" "${INGRESS_IP}" \
+  "${LONGHORN_HOSTNAME}" "${LONGHORN_LOCAL_HOSTNAME}"
 
 longhorn_host_was_set=0
 if [[ ${LONGHORN_HOST+x} ]]; then
   longhorn_host_was_set=1
   prev_longhorn_host="${LONGHORN_HOST}"
 fi
+longhorn_local_host_was_set=0
+if [[ ${LONGHORN_LOCAL_HOST+x} ]]; then
+  longhorn_local_host_was_set=1
+  prev_longhorn_local_host="${LONGHORN_LOCAL_HOST}"
+fi
 export LONGHORN_HOST="${LONGHORN_HOSTNAME}"
+export LONGHORN_LOCAL_HOST="${LONGHORN_LOCAL_HOSTNAME}"
 ingress_file=$(render_template "${ROOT_DIR}/manifests/longhorn.ingress.yaml")
 if (( longhorn_host_was_set )); then
   export LONGHORN_HOST="${prev_longhorn_host}"
 else
   unset LONGHORN_HOST
 fi
+if (( longhorn_local_host_was_set )); then
+  export LONGHORN_LOCAL_HOST="${prev_longhorn_local_host}"
+else
+  unset LONGHORN_LOCAL_HOST
+fi
 kubectl apply -f "${ingress_file}"
-log "Longhorn UI disponível em http://${LONGHORN_HOSTNAME}"
+log "Longhorn UI disponível em https://${LONGHORN_HOSTNAME} e https://${LONGHORN_LOCAL_HOSTNAME}"
 
 ok "${STEP}"

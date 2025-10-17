@@ -12,19 +12,29 @@ ensure_helm
 : "${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD em secrets.env}"
 
 GRAFANA_HOSTNAME=$(resolve_hostname "${GRAFANA_HOST_OVERRIDE:-}" "grafana")
+GRAFANA_LOCAL_HOSTNAME=$(local_sslip_host "grafana")
+INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
+kubectl create ns monitoring || true
+
+apply_certificate "monitoring" "grafana-tls" "grafana-tls" "${INGRESS_IP}" \
+  "${GRAFANA_HOSTNAME}" "${GRAFANA_LOCAL_HOSTNAME}"
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
-kubectl create ns monitoring || true
 
 helm upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack -n monitoring \
   --set grafana.adminUser="${GRAFANA_ADMIN_USER}" \
   --set grafana.adminPassword="${GRAFANA_ADMIN_PASSWORD}" \
   --set grafana.ingress.enabled=true \
   --set grafana.ingress.ingressClassName=nginx \
-  --set grafana.ingress.hosts="[\"${GRAFANA_HOSTNAME}\"]"
+  --set grafana.ingress.hosts[0]="${GRAFANA_HOSTNAME}" \
+  --set grafana.ingress.hosts[1]="${GRAFANA_LOCAL_HOSTNAME}" \
+  --set grafana.ingress.tls[0].hosts[0]="${GRAFANA_HOSTNAME}" \
+  --set grafana.ingress.tls[0].hosts[1]="${GRAFANA_LOCAL_HOSTNAME}" \
+  --set grafana.ingress.tls[0].secretName="grafana-tls"
 
 save_state_var "GRAFANA_HOSTNAME" "${GRAFANA_HOSTNAME}"
-log "Grafana disponível em http://${GRAFANA_HOSTNAME}"
+save_state_var "GRAFANA_LOCAL_HOSTNAME" "${GRAFANA_LOCAL_HOSTNAME}"
+log "Grafana disponível em https://${GRAFANA_HOSTNAME} e https://${GRAFANA_LOCAL_HOSTNAME}"
 
 ok "${STEP}"

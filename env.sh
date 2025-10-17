@@ -19,12 +19,15 @@ export LB_POOL_END="192.168.30.120"
 # Deixe em branco para IP dinâmico; defina para fixar manualmente.
 export INGRESS_VIP=""
 
-# Hostnames (opcionais) - sobrescrevem a geração automática baseada no IP do ingress
+# Hostnames (opcionais) - sobrescrevem a geração automática baseada no IP do ingress (formato slug: 192-168-30-100)
 export RANCHER_HOST_OVERRIDE=""
 export GRAFANA_HOST_OVERRIDE=""
 export LONGHORN_HOST_OVERRIDE=""
 export HUBBLE_HOST_OVERRIDE=""
 export INGRESS_HOST_TEMPLATE="%s.%s.sslip.io"
+
+# TLS
+export TLS_CLUSTER_ISSUER="${TLS_CLUSTER_ISSUER:-selfsigned-cluster-issuer}"
 
 # Estado / logs
 export STATE_DIR="/var/opt/cluster-state"

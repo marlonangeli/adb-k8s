@@ -5,8 +5,23 @@ metadata:
   namespace: longhorn-system
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - ${LONGHORN_HOST}
+        - ${LONGHORN_LOCAL_HOST}
+      secretName: longhorn-tls
   rules:
     - host: ${LONGHORN_HOST}
+      http:
+        paths:
+        - path: /
+          pathType: Prefix
+          backend:
+            service:
+              name: longhorn-frontend
+              port:
+                number: 80
+    - host: ${LONGHORN_LOCAL_HOST}
       http:
         paths:
         - path: /

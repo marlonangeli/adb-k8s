@@ -6,36 +6,75 @@ source "$(dirname "$0")/lib.sh"
 STEP="rancher"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
-require_commands kubectl openssl
+require_commands kubectl
 ensure_helm
+: "${RANCHER_ADMIN_PASSWORD:?defina RANCHER_ADMIN_PASSWORD em secrets.env}"
 helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
 helm repo update
 kubectl create ns cattle-system || true
 
 RANCHER_HOSTNAME=$(resolve_hostname "${RANCHER_HOST_OVERRIDE:-}" "rancher")
+RANCHER_LOCAL_HOSTNAME=$(local_sslip_host "rancher")
 INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
 
-TLS_KEY=$(mktemp)
-TLS_CRT=$(mktemp)
-register_tmp "${TLS_KEY}"
-register_tmp "${TLS_CRT}"
-if ! kubectl -n cattle-system get secret rancher-tls >/dev/null 2>&1; then
-  openssl req -x509 -nodes -newkey rsa:2048 -days 365 \
-    -keyout "${TLS_KEY}" -out "${TLS_CRT}" \
-    -subj "/CN=${RANCHER_HOSTNAME}" \
-    -addext "subjectAltName=DNS:${RANCHER_HOSTNAME},IP:${INGRESS_IP}"
-  kubectl -n cattle-system create secret tls rancher-tls \
-    --key "${TLS_KEY}" --cert "${TLS_CRT}"
-fi
+apply_certificate "cattle-system" "rancher-tls" "rancher-tls" "${INGRESS_IP}" \
+  "${RANCHER_HOSTNAME}" "${RANCHER_LOCAL_HOSTNAME}"
 
 helm upgrade -i rancher rancher-latest/rancher -n cattle-system \
   --set hostname="${RANCHER_HOSTNAME}" \
+  --set bootstrapPassword="${RANCHER_ADMIN_PASSWORD}" \
   --set ingress.tls.source=secret \
   --set privateCA=true
 
-kubectl -n cattle-system patch ingress rancher -p '{"spec":{"tls":[{"hosts":["'"${RANCHER_HOSTNAME}"'"],"secretName":"rancher-tls"}]}}'
+for _ in {1..30}; do
+  if kubectl -n cattle-system get ingress rancher >/dev/null 2>&1; then
+    break
+  fi
+  sleep 5
+done
+
+kubectl -n cattle-system get ingress rancher >/dev/null 2>&1 || { log "Ingress rancher não encontrado após instalação"; exit 1; }
+
+kubectl -n cattle-system patch ingress rancher --type merge -p '{
+  "spec": {
+    "tls": [
+      {
+        "hosts": ["'"${RANCHER_HOSTNAME}"'","'"${RANCHER_LOCAL_HOSTNAME}"'"],
+        "secretName": "rancher-tls"
+      }
+    ]
+  }
+}'
+
+current_hosts=$(kubectl -n cattle-system get ingress rancher -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
+if ! grep -qw "${RANCHER_LOCAL_HOSTNAME}" <<<"${current_hosts}"; then
+  kubectl -n cattle-system patch ingress rancher --type json -p='[
+    {
+      "op": "add",
+      "path": "/spec/rules/-",
+      "value": {
+        "host": "'"${RANCHER_LOCAL_HOSTNAME}"'",
+        "http": {
+          "paths": [
+            {
+              "path": "/",
+              "pathType": "Prefix",
+              "backend": {
+                "service": {
+                  "name": "rancher",
+                  "port": { "name": "https" }
+                }
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]'
+fi
 
 save_state_var "RANCHER_HOSTNAME" "${RANCHER_HOSTNAME}"
-log "Rancher disponível em https://${RANCHER_HOSTNAME}"
+save_state_var "RANCHER_LOCAL_HOSTNAME" "${RANCHER_LOCAL_HOSTNAME}"
+log "Rancher disponível em https://${RANCHER_HOSTNAME} e https://${RANCHER_LOCAL_HOSTNAME}"
 
 ok "${STEP}"

@@ -5,8 +5,23 @@ metadata:
   namespace: kube-system
 spec:
   ingressClassName: nginx
+  tls:
+  - hosts:
+    - ${HUBBLE_HOST}
+    - ${HUBBLE_LOCAL_HOST}
+    secretName: hubble-tls
   rules:
   - host: ${HUBBLE_HOST}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hubble-ui
+            port:
+              number: 80
+  - host: ${HUBBLE_LOCAL_HOST}
     http:
       paths:
       - path: /

@@ -6,7 +6,11 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 source "${ROOT_DIR}/env.sh"
 SECRETS_FILE="${ROOT_DIR}/secrets.env"
-[[ -f "${SECRETS_FILE}" ]] && source "${SECRETS_FILE}"
+if [[ ! -f "${SECRETS_FILE}" ]]; then
+  echo "crie secrets.env a partir de secrets.env.example e preencha as credenciais" >&2
+  exit 1
+fi
+source "${SECRETS_FILE}"
 
 mkdir -p "${STATE_DIR}"
 touch "${LOG_FILE}"
@@ -95,7 +99,65 @@ resolve_hostname() {
   local ip template
   ip=$(current_ingress_ip) || { log "IP do ingress ainda não disponível (prefixo: ${prefix})"; exit 1; }
   template="${INGRESS_HOST_TEMPLATE:-%s.%s.sslip.io}"
-  printf "${template}" "${prefix}" "${ip}"
+  printf "${template}" "${prefix}" "$(sslip_slug "${ip}")"
+}
+
+sslip_slug() {
+  local raw="$1"
+  raw="${raw//./-}"
+  raw="${raw//:/-}"
+  echo "${raw}"
+}
+
+local_sslip_host() {
+  local prefix="$1"
+  printf "%s.127-0-0-1.sslip.io" "${prefix}"
+}
+
+apply_certificate() {
+  local namespace="$1"
+  local certificate_name="$2"
+  local secret_name="$3"
+  local ip_address="$4"
+  shift 4
+  local dns_names=("$@")
+
+  if [[ -z "${TLS_CLUSTER_ISSUER:-}" ]]; then
+    echo "defina TLS_CLUSTER_ISSUER em env.sh ou secrets.env" >&2
+    exit 1
+  fi
+  if [[ -z "${namespace}" || -z "${certificate_name}" || -z "${secret_name}" || -z "${ip_address}" ]]; then
+    echo "apply_certificate: parâmetros insuficientes" >&2
+    exit 1
+  fi
+  if ((${#dns_names[@]} == 0)); then
+    echo "apply_certificate: informe pelo menos um DNS" >&2
+    exit 1
+  fi
+
+  local manifest
+  manifest=$(mktemp)
+  register_tmp "${manifest}"
+  {
+    printf 'apiVersion: cert-manager.io/v1\n'
+    printf 'kind: Certificate\n'
+    printf 'metadata:\n'
+    printf '  name: %s\n' "${certificate_name}"
+    printf '  namespace: %s\n' "${namespace}"
+    printf 'spec:\n'
+    printf '  secretName: %s\n' "${secret_name}"
+    printf '  issuerRef:\n'
+    printf '    kind: ClusterIssuer\n'
+    printf '    name: %s\n' "${TLS_CLUSTER_ISSUER}"
+    printf '  dnsNames:\n'
+    local dns
+    for dns in "${dns_names[@]}"; do
+      printf '    - %s\n' "${dns}"
+    done
+    printf '  ipAddresses:\n'
+    printf '    - %s\n' "${ip_address}"
+  } >"${manifest}"
+  kubectl apply -f "${manifest}"
 }
 
 wait_for_lb_ip() {
