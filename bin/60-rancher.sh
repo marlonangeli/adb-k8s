@@ -46,6 +46,12 @@ kubectl -n cattle-system patch ingress rancher --type merge -p '{
   }
 }'
 
+tls_hosts=$(kubectl -n cattle-system get ingress rancher -o jsonpath='{.spec.tls[?(@.secretName=="rancher-tls")].hosts[*]}' 2>/dev/null || echo "")
+if ! grep -qw "${RANCHER_HOSTNAME}" <<<"${tls_hosts}" || ! grep -qw "${RANCHER_LOCAL_HOSTNAME}" <<<"${tls_hosts}"; then
+  log "ingress rancher não apresenta todos os hosts esperados na configuração TLS (rancher-tls)."
+  exit 1
+fi
+
 current_hosts=$(kubectl -n cattle-system get ingress rancher -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
 if ! grep -qw "${RANCHER_LOCAL_HOSTNAME}" <<<"${current_hosts}"; then
   kubectl -n cattle-system patch ingress rancher --type json -p='[
@@ -71,6 +77,15 @@ if ! grep -qw "${RANCHER_LOCAL_HOSTNAME}" <<<"${current_hosts}"; then
       }
     }
   ]'
+
+  updated_hosts=$(kubectl -n cattle-system get ingress rancher -o jsonpath='{.spec.rules[*].host}' 2>/dev/null || echo "")
+  if ! grep -qw "${RANCHER_LOCAL_HOSTNAME}" <<<"${updated_hosts}"; then
+    log "falha ao adicionar o host local ${RANCHER_LOCAL_HOSTNAME} ao ingress rancher."
+    exit 1
+  fi
+  log "host ${RANCHER_LOCAL_HOSTNAME} adicionado ao ingress rancher."
+else
+  log "host ${RANCHER_LOCAL_HOSTNAME} já configurado no ingress rancher."
 fi
 
 save_state_var "RANCHER_HOSTNAME" "${RANCHER_HOSTNAME}"

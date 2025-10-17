@@ -6,3 +6,5 @@
 - Rancher, Grafana, Longhorn e Hubble agora recebem certificados emitidos pelo cert-manager e expõem endpoints HTTPS.
 - `secrets.env` passou a ser obrigatório no início dos estágios e o exemplo ganhou credenciais para Rancher, Grafana e Argo CD.
 - Documentação e scripts ajustados para refletir o novo fluxo de TLS e geração de hostnames.
+- Orquestração de vClusters atualizada (`bin/90-vcluster.sh`) para suportar múltiplos tenants, publicar kubeconfigs para observabilidade e aplicar políticas Cilium por perfil.
+- Fluxos de observabilidade, Longhorn e Rancher passaram a validar pré-requisitos/rollouts e reaproveitar recursos existentes (`bin/70-observability.sh`, `bin/80-longhorn.sh`, `bin/60-rancher.sh`).

@@ -16,8 +16,12 @@ GRAFANA_LOCAL_HOSTNAME=$(local_sslip_host "grafana")
 INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
 kubectl create ns monitoring || true
 
-apply_certificate "monitoring" "grafana-tls" "grafana-tls" "${INGRESS_IP}" \
-  "${GRAFANA_HOSTNAME}" "${GRAFANA_LOCAL_HOSTNAME}"
+if kubectl -n monitoring get secret grafana-tls >/dev/null 2>&1; then
+  log "certificado grafana-tls já existe; reutilizando emissão anterior."
+else
+  apply_certificate "monitoring" "grafana-tls" "grafana-tls" "${INGRESS_IP}" \
+    "${GRAFANA_HOSTNAME}" "${GRAFANA_LOCAL_HOSTNAME}"
+fi
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
@@ -32,6 +36,16 @@ helm upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack
   --set grafana.ingress.tls[0].hosts[0]="${GRAFANA_HOSTNAME}" \
   --set grafana.ingress.tls[0].hosts[1]="${GRAFANA_LOCAL_HOSTNAME}" \
   --set grafana.ingress.tls[0].secretName="grafana-tls"
+
+log "validando rollout do kube-prometheus-stack"
+wait_rollout monitoring deployment kube-prometheus-stack-operator
+wait_rollout monitoring deployment kube-prometheus-stack-grafana
+if kubectl -n monitoring get statefulset kube-prometheus-stack-prometheus >/dev/null 2>&1; then
+  wait_rollout monitoring statefulset kube-prometheus-stack-prometheus
+fi
+if kubectl -n monitoring get statefulset kube-prometheus-stack-alertmanager >/dev/null 2>&1; then
+  wait_rollout monitoring statefulset kube-prometheus-stack-alertmanager
+fi
 
 save_state_var "GRAFANA_HOSTNAME" "${GRAFANA_HOSTNAME}"
 save_state_var "GRAFANA_LOCAL_HOSTNAME" "${GRAFANA_LOCAL_HOSTNAME}"
