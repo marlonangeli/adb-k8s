@@ -9,9 +9,10 @@ donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 require_commands kubectl
 ensure_cilium_cli
 
-log "Aplicando Cilium (v1.18.0)"
+CILIUM_VERSION="v1.18.2"
+log "Aplicando Cilium (${CILIUM_VERSION})"
 cilium install \
-  --version v1.18.0 \
+  --version ${CILIUM_VERSION} \
   --set kubeProxyReplacement=strict \
   --set k8sServiceHost="${CP_IP}" --set k8sServicePort=6443 \
   --set ipam.mode=cluster-pool \
