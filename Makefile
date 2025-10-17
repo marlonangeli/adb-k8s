@@ -2,6 +2,9 @@ SHELL := /bin/bash
 
 all: init-cp cilium metallb ingress cert-manager rancher observability longhorn vcluster
 
+so-requirements:
+	@bin/10-so-requirements.sh
+
 init-cp:
 	@bin/20-kubeadm-init.sh
 
