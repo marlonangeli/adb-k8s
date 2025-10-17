@@ -1,0 +1,60 @@
+{
+  "files.associations": {
+    "*.sh": "shellscript",
+    "*.bash": "shellscript",
+    "Dockerfile.*": "dockerfile",
+    "*.yaml.tpl": "helm",
+    "*.tpl": "gotemplate",
+    "Chart.yaml": "yaml"
+  },
+  "editor.formatOnSave": true,
+  "editor.codeActionsOnSave": {
+    "source.fixAll": "explicit",
+    "source.organizeImports": "explicit"
+  },
+  "[yaml]": {
+    "editor.defaultFormatter": "redhat.vscode-yaml",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "[shellscript]": {
+    "editor.defaultFormatter": "foxundermoon.shell-format",
+    "editor.formatOnSave": true,
+    "editor.tabSize": 2
+  },
+  "yaml.validate": true,
+  "yaml.format.enable": true,
+  "yaml.customTags": [
+    "!And",
+    "!If",
+    "!Not",
+    "!Equals",
+    "!Or",
+    "!Ref",
+    "!GetAtt",
+    "!Sub",
+    "!ImportValue",
+    "!Base64",
+    "!Join",
+    "!FindInMap",
+    "!Condition",
+    "!Vault",
+    "!include"
+  ],
+  "yaml.schemas": {
+    "https://raw.githubusercontent.com/yannh/kubernetes-json-schema/master/v1.27.0-standalone/all.json": [
+      "/*.yaml",
+      "/**/*.yaml",
+      "/**/*.yml"
+    ]
+  },
+  "shfmt.path": "shfmt",
+  "shfmt.args": [
+    "-i",
+    "2",
+    "-ci"
+  ],
+  "shellcheck.executablePath": "shellcheck",
+  "files.trimTrailingWhitespace": true,
+  "files.insertFinalNewline": true
+}
