@@ -8,3 +8,4 @@
 - Documentação e scripts ajustados para refletir o novo fluxo de TLS e geração de hostnames.
 - Orquestração de vClusters atualizada (`bin/90-vcluster.sh`) para suportar múltiplos tenants, publicar kubeconfigs para observabilidade e aplicar políticas Cilium por perfil.
 - Fluxos de observabilidade, Longhorn e Rancher passaram a validar pré-requisitos/rollouts e reaproveitar recursos existentes (`bin/70-observability.sh`, `bin/80-longhorn.sh`, `bin/60-rancher.sh`).
+- Instalação do Cilium agora detecta a ausência do CRD `ServiceMonitor`, aplica tolerations para ambiente single-node e posterga a habilitação automática do ServiceMonitor até a etapa de observabilidade (`bin/30-cilium.sh` / `bin/70-observability.sh`).
