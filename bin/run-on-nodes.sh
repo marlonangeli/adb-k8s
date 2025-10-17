@@ -25,6 +25,8 @@ EOF
 }
 
 target_hosts=("${WORKERS[@]}")
+script_path=""
+script_args=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,26 +54,33 @@ while [[ $# -gt 0 ]]; do
       ;;
     --)
       shift
+      script_args+=("$@")
       break
       ;;
     -*)
-      echo "opção desconhecida: $1" >&2
-      usage
-      exit 1
+      if [[ -z "${script_path}" ]]; then
+        echo "opção desconhecida: $1" >&2
+        usage
+        exit 1
+      fi
+      script_args+=("$1")
+      shift
       ;;
     *)
-      break
+      if [[ -z "${script_path}" ]]; then
+        script_path="$1"
+      else
+        script_args+=("$1")
+      fi
+      shift
       ;;
   esac
 done
 
 [[ ${#target_hosts[@]} -gt 0 ]] || { echo "nenhum host selecionado"; exit 1; }
-
-[[ $# -gt 0 ]] || { usage; exit 1; }
-script_path="$1"
-shift
+[[ -n "${script_path}" ]] || { usage; exit 1; }
 
 for host in "${target_hosts[@]}"; do
   log "executando ${script_path} em ${host}"
-  run_remote_script "${host}" "${script_path}" "$@"
+  run_remote_script "${host}" "${script_path}" "${script_args[@]}"
 done

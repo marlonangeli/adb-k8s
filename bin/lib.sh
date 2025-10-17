@@ -227,6 +227,10 @@ ensure_vcluster_cli() {
 
 ssh_options() {
   local -a __opts__
+  if [[ -n "${REMOTE_SSH_CONTROL_PATH:-}" ]]; then
+    local expanded_path="${REMOTE_SSH_CONTROL_PATH/#\~/${HOME}}"
+    mkdir -p "$(dirname "${expanded_path}")"
+  fi
   read -ra __opts__ <<<"${REMOTE_SSH_OPTIONS:-}"
   printf '%s\n' "${__opts__[@]}"
 }

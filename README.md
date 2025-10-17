@@ -69,13 +69,11 @@
    ```
 2. **Control-plane** – `bin/20-kubeadm-init.sh`: kubeadm init sem kube-proxy, gera `~/join-worker.sh`.
 3. **Rede** – `bin/30-cilium.sh`: garante Cilium CLI e aplica Cilium v1.18 com Hubble.
-4. **LoadBalancer** – `bin/40-metallb.sh`: instala operador + pool L2.
-5. **Ingress** – `bin/50-ingress-nginx.sh`: instala via Helm; captura automaticamente o IP atribuído pelo MetalLB (armazenado em `${STATE_DIR}/dynamic.env`).
-6. **Cert-manager** – `bin/55-cert-manager.sh`: instala o chart oficial, cria CA interna e registra o emissor `${TLS_CLUSTER_ISSUER}`.
-7. **Workers** – executar `~/join-worker.sh` nos nós 53 e 54 (ex.: `ssh utfpr@192.168.30.53`, `su -`, `~/join-worker.sh`). Pode ser orquestrado com:
-   ```bash
-   bin/run-on-nodes.sh ~/join-worker.sh --workers
-   ```
+4. **Workers** – `bin/35-join-workers.sh`: utiliza o `~/join-worker.sh` gerado no passo anterior, sincroniza o repositório nos hosts de `WORKERS`, verifica se já fazem parte do cluster e executa `kubeadm join` apenas onde necessário. Disponível via `make workers` ou incluso em `make all`.
+   - Execuções manuais continuam possíveis (`ssh utfpr@IP`, `su -`, `~/join-worker.sh`) ou com `bin/run-on-nodes.sh`, mas o estágio agora garante idempotência e evita reprocessar nós já integrados.
+5. **LoadBalancer** – `bin/40-metallb.sh`: instala operador + pool L2.
+6. **Ingress** – `bin/50-ingress-nginx.sh`: instala via Helm; captura automaticamente o IP atribuído pelo MetalLB (armazenado em `${STATE_DIR}/dynamic.env`).
+7. **Cert-manager** – `bin/55-cert-manager.sh`: instala o chart oficial, cria CA interna e registra o emissor `${TLS_CLUSTER_ISSUER}`.
 8. **Planos superiores** (no control-plane):
    - `bin/60-rancher.sh`: instala Helm chart, emite certificado via cert-manager e adiciona host local `rancher.127-0-0-1.sslip.io`.
    - `bin/70-observability.sh`: kube-prometheus-stack com ingress Grafana em HTTPS + alias local para túnel.

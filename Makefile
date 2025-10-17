@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-all: init-cp cilium metallb ingress cert-manager rancher observability longhorn vcluster
+all: init-cp cilium workers metallb ingress cert-manager rancher observability longhorn vcluster
 
 so-requirements:
 	@bin/10-so-requirements.sh
@@ -10,6 +10,9 @@ init-cp:
 
 cilium:
 	@bin/30-cilium.sh
+
+workers:
+	@bin/35-join-workers.sh
 
 metallb:
 	@bin/40-metallb.sh

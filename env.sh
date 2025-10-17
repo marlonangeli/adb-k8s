@@ -5,9 +5,12 @@
 export CP_IP="192.168.30.52"
 export WORKERS=("192.168.30.53" "192.168.30.54")
 export REMOTE_SSH_USER="${REMOTE_SSH_USER:-utfpr}"
-export REMOTE_SSH_OPTIONS="${REMOTE_SSH_OPTIONS:--o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null}"
 REMOTE_DEFAULT_BASE_DIR="/home/${REMOTE_SSH_USER}/adb-k8s"
 export REMOTE_BASE_DIR="${REMOTE_BASE_DIR:-${REMOTE_DEFAULT_BASE_DIR}}"
+REMOTE_DEFAULT_CONTROL_PATH="${HOME}/.ssh/adb-%C"
+export REMOTE_SSH_CONTROL_PATH="${REMOTE_SSH_CONTROL_PATH:-${REMOTE_DEFAULT_CONTROL_PATH}}"
+REMOTE_DEFAULT_SSH_OPTIONS="-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ControlMaster=auto -o ControlPersist=60 -o ControlPath=${REMOTE_SSH_CONTROL_PATH}"
+export REMOTE_SSH_OPTIONS="${REMOTE_SSH_OPTIONS:-${REMOTE_DEFAULT_SSH_OPTIONS}}"
 
 # Networking
 export POD_CIDR="10.10.0.0/16"
