@@ -56,10 +56,11 @@
 
 ### Preparação
 
-1. Copie `secrets.env.example` para `secrets.env` e defina as senhas de Grafana, Rancher, Argo CD (e demais serviços que usar).
-2. Ajuste `env.sh` conforme necessário (IPs, ranges, overrides de host, opções de SSH).
-3. Garanta acesso SSH como root entre o nó de controle e os demais (chaves ou senha).
-4. Opcional: teste conectividade com `bin/run-on-nodes.sh bin/10-so-requirements.sh --hosts "192.168.30.53" -- --help` (será solicitado o password de root via `su -`).
+1. (Opcional, recomendado em ambientes novos) Execute `scripts/install-cli-deps.sh` como root para instalar/atualizar automaticamente `kubeadm`, `kubectl`, `kubelet`, Helm, Cilium CLI, vcluster e Argo CD (requer conexão externa e `curl`, `tar`, `gpg`).
+2. Copie `secrets.env.example` para `secrets.env` e defina as senhas de Grafana, Rancher, Argo CD (e demais serviços que usar).
+3. Ajuste `env.sh` conforme necessário (IPs, ranges, overrides de host, opções de SSH).
+4. Garanta acesso SSH como root entre o nó de controle e os demais (chaves ou senha).
+5. Opcional: teste conectividade com `bin/run-on-nodes.sh bin/10-so-requirements.sh --hosts "192.168.30.53" -- --help` (será solicitado o password de root via `su -`).
 
 ### Fluxo de Provisionamento
 

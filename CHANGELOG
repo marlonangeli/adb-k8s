@@ -3,10 +3,11 @@
 ## 2025-10-17
 - Orquestração dos workers automatizada com `bin/35-join-workers.sh`/`make workers`, garantindo execução antes do MetalLB e evitando reprocessar nós já presentes.
 - Criado `scripts/worker-join.sh` para executar `kubeadm join` de forma idempotente diretamente nas máquinas alvo.
-- `bin/run-on-nodes.sh` agora aceita flags após o caminho do script e o fluxo SSH passou a reutilizar conexões (`env.sh`/`bin/lib.sh`), reduzindo múltiplos prompts de senha.
+- O script `bin/run-on-nodes.sh` agora aceita flags após o caminho do script e o fluxo SSH passou a reutilizar conexões (`env.sh`/`bin/lib.sh`), reduzindo múltiplos prompts de senha.
 - Documentação atualizada descrevendo o novo estágio na sequência de provisionamento (`README.md`).
 - Instalação do cert-manager ajustada para usar `crds.enabled` e definir a `rotationPolicy` do certificado raiz, eliminando avisos pós-instalação (`bin/55-cert-manager.sh`).
 - Certificados emitidos pelos helpers agora ativam rotação automática e o deploy do Rancher força `--kube-version` compatível para clusters >= 1.34 (configurável via `RANCHER_HELM_KUBE_VERSION_OVERRIDE`) (`bin/lib.sh`, `bin/60-rancher.sh`, `README.md`).
+- Adicionado script `scripts/install-cli-deps.sh` para instalar/verificar CLIs essenciais (kubeadm/kubectl/kubelet, Helm, Cilium CLI, vcluster, Argo CD) e documentada sua utilização opcional (`README.md`).
 
 ## 2025-10-16
 - Adotado formato `sslip.io` com IPs em `dash` e aliases locais `<serviço>.127-0-0-1.sslip.io` em todos os ingress.
