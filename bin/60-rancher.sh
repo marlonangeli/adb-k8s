@@ -17,33 +17,45 @@ RANCHER_HOSTNAME=$(resolve_hostname "${RANCHER_HOST_OVERRIDE:-}" "rancher")
 RANCHER_LOCAL_HOSTNAME=$(local_sslip_host "rancher")
 INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
 
-helm_extra_args=()
-if [[ -n "${RANCHER_HELM_KUBE_VERSION_OVERRIDE:-}" ]]; then
-  helm_extra_args+=(--kube-version "${RANCHER_HELM_KUBE_VERSION_OVERRIDE}")
-else
-  server_version_raw=$(kubectl version --short 2>/dev/null | awk '/Server Version:/ {print $3}')
-  if [[ -n "${server_version_raw}" ]]; then
-    server_semver="${server_version_raw#v}"
-    IFS='.' read -r server_major server_minor _ <<<"${server_semver}"
-    if [[ -n "${server_major}" && -n "${server_minor}" ]]; then
-      if (( server_major > 1 || (server_major == 1 && server_minor >= 34) )); then
-        default_override="${RANCHER_HELM_KUBE_VERSION_FALLBACK:-1.33.9}"
-        helm_extra_args+=(--kube-version "${default_override}")
-        log "cluster Kubernetes ${server_semver} ainda não suportado pelo chart (<1.34); aplicando Rancher com --kube-version ${default_override}. Defina RANCHER_HELM_KUBE_VERSION_OVERRIDE para ajustar."
-      fi
+server_version_raw=""
+server_semver=""
+if kubectl version --output=json >/tmp/.kubever.json 2>/dev/null; then
+  server_version_raw=$(sed -n 's/.*"gitVersion":[[:space:]]*"\(v[^"]*\)".*/\1/p' /tmp/.kubever.json | head -n1)
+  rm -f /tmp/.kubever.json
+fi
+if [[ -z "${server_version_raw}" ]]; then
+  server_version_raw=$(kubectl version 2>/dev/null | awk -F': ' '/Server Version/ {print $2; exit}')
+fi
+server_semver="${server_version_raw#v}"
+
+chart_source="rancher-latest/rancher"
+chart_tmp=""
+if [[ -n "${RANCHER_HELM_CHART_OVERRIDE:-}" ]]; then
+  chart_source="${RANCHER_HELM_CHART_OVERRIDE}"
+elif [[ -n "${server_semver}" ]]; then
+  IFS='.' read -r server_major server_minor _ <<<"${server_semver}"
+  if (( server_major > 1 || (server_major == 1 && server_minor >= 34) )); then
+    chart_tmp=$(mktemp -d)
+    trap 'if [[ -n "${chart_tmp}" ]]; then rm -rf "${chart_tmp}"; fi' EXIT
+    helm pull rancher-latest/rancher --untar --untardir "${chart_tmp}"
+    chart_source="${chart_tmp}/rancher"
+    if grep -q 'kubeVersion:' "${chart_source}/Chart.yaml"; then
+      sed -i -e 's/kubeVersion:.*/kubeVersion: ">= 1.24.0-0 < 1.36.0-0"/' "${chart_source}/Chart.yaml"
+    else
+      printf 'kubeVersion: ">= 1.24.0-0 < 1.36.0-0"\n' >>"${chart_source}/Chart.yaml"
     fi
+    log "cluster Kubernetes ${server_semver} excede o limite suportado pelo chart; kubeVersion ajustado localmente para aceitar até <1.36.0."
   fi
 fi
 
 apply_certificate "cattle-system" "rancher-tls" "rancher-tls" "${INGRESS_IP}" \
   "${RANCHER_HOSTNAME}" "${RANCHER_LOCAL_HOSTNAME}"
 
-helm upgrade -i rancher rancher-latest/rancher -n cattle-system \
+helm upgrade -i rancher "${chart_source}" -n cattle-system \
   --set hostname="${RANCHER_HOSTNAME}" \
   --set bootstrapPassword="${RANCHER_ADMIN_PASSWORD}" \
   --set ingress.tls.source=secret \
-  --set privateCA=true \
-  "${helm_extra_args[@]}"
+  --set privateCA=true
 
 for _ in {1..30}; do
   if kubectl -n cattle-system get ingress rancher >/dev/null 2>&1; then

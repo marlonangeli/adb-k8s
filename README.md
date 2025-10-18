@@ -77,7 +77,7 @@
 7. **Cert-manager** – `bin/55-cert-manager.sh`: instala o chart oficial, cria CA interna e registra o emissor `${TLS_CLUSTER_ISSUER}`.
 8. **Planos superiores** (no control-plane):
    - `bin/60-rancher.sh`: instala Helm chart, emite certificado via cert-manager e adiciona host local `rancher.127-0-0-1.sslip.io`.
-     Clusters Kubernetes >= 1.34 recebem automaticamente `--kube-version 1.33.9`; ajuste via `RANCHER_HELM_KUBE_VERSION_OVERRIDE` se utilizar chart compatível mais recente.
+     Para clusters >= 1.34 o script baixa o chart localmente e relaxa a restrição `kubeVersion` para permitir a instalação (opcionalmente, defina `RANCHER_HELM_CHART_OVERRIDE` para apontar um chart já compatível).
    - `bin/70-observability.sh`: kube-prometheus-stack com ingress Grafana em HTTPS + alias local para túnel.
    - `bin/80-longhorn.sh`: Helm + ingress HTTPS do Longhorn emitido pelo cert-manager.
    - `bin/90-vcluster.sh`: instala CLI, cria tenant/shared, aplica CNP e ingress HTTPS do Hubble com host local.
