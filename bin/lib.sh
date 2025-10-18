@@ -146,6 +146,8 @@ apply_certificate() {
     printf '  namespace: %s\n' "${namespace}"
     printf 'spec:\n'
     printf '  secretName: %s\n' "${secret_name}"
+    printf '  privateKey:\n'
+    printf '    rotationPolicy: Always\n'
     printf '  issuerRef:\n'
     printf '    kind: ClusterIssuer\n'
     printf '    name: %s\n' "${TLS_CLUSTER_ISSUER}"
