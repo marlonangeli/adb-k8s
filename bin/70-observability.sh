@@ -44,7 +44,7 @@ if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   helm_args+=(--set grafana.ingress.tls[0].hosts[1]="${GRAFANA_LOCAL_HOSTNAME}")
   helm_args+=(--set grafana.ingress.tls[0].secretName="grafana-tls")
 else
-  helm_args+=(--set-string grafana.ingress.annotations.\"nginx\\.ingress\\.kubernetes\\.io/ssl-redirect\"=false)
+  helm_args+=(--set-string grafana.ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=false)
 fi
 
 helm "${helm_args[@]}"

@@ -77,7 +77,10 @@
 7. **Cert-manager** – `bin/55-cert-manager.sh`: desativado quando `TLS_ENABLED=0` (padrão). Reative ajustando `TLS_ENABLED=1`/`TLS_CLUSTER_ISSUER`.
    - Se TLS estiver ativo e `CERT_MANAGER_ACME_EMAIL` estiver definido, o script também cria o `ClusterIssuer` ACME (`letsencrypt-prod` por padrão).
 8. **Planos superiores** (no control-plane):
-   - `bin/60-rancher.sh`: instala Helm chart, emite certificado via cert-manager e adiciona host local `rancher.127-0-0-1.sslip.io`.
+   - `bin/60-rancher.sh`: instala o chart do Rancher em modo HTTP (TLS externo) com `ingressClassName=nginx`, adiciona o host local `rancher.127-0-0-1.sslip.io`, reduz o padrão de réplicas para 1 (`RANCHER_REPLICAS`) e alonga a `startupProbe` para clusters mais lentos (`RANCHER_STARTUP_FAILURE_THRESHOLD`).
+     - Se estiver reaplicando após uma versão anterior do script, ajuste manualmente o Ingress existente:  
+       `kubectl -n cattle-system patch ingress rancher --type merge -p '{"spec":{"ingressClassName":"nginx"}}'`  
+       `kubectl -n cattle-system annotate ingress rancher kubernetes.io/ingress.class=nginx --overwrite`
      Para clusters >= 1.34 o script baixa o chart localmente e relaxa a restrição `kubeVersion` para permitir a instalação (opcionalmente, defina `RANCHER_HELM_CHART_OVERRIDE` para apontar um chart já compatível).
    - `bin/70-observability.sh`: kube-prometheus-stack com ingress Grafana em HTTPS + alias local para túnel.
    - `bin/80-longhorn.sh`: Helm + ingress HTTPS do Longhorn emitido pelo cert-manager.
@@ -98,6 +101,7 @@ Todos os scripts validam dependências, instalam CLIs ausentes (Helm, Cilium, vc
 - Acessos:
   - Carregue os dados dinâmicos: `source ${STATE_DIR}/dynamic.env`
   - Rancher: `http://${RANCHER_HOSTNAME}` (ou `http://${RANCHER_LOCAL_HOSTNAME}` via túnel); login inicial controlado por `RANCHER_ADMIN_PASSWORD`.
+    Após o primeiro acesso, defina *Settings → Server URL* para `http://${RANCHER_HOSTNAME}` (ou para o host externo que será utilizado pelos demais nós).
   - Grafana: `http://${GRAFANA_HOSTNAME}` (ou `http://${GRAFANA_LOCAL_HOSTNAME}`); credenciais em `secrets.env`.
   - Longhorn: `http://${LONGHORN_HOSTNAME}` (ou `http://${LONGHORN_LOCAL_HOSTNAME}`).
   - Hubble UI: `http://${HUBBLE_HOSTNAME}` (ou `http://${HUBBLE_LOCAL_HOSTNAME}`).
@@ -105,7 +109,13 @@ Todos os scripts validam dependências, instalam CLIs ausentes (Helm, Cilium, vc
 
 ### Notas Importantes
 
-- Para reativar TLS, exporte `TLS_ENABLED=1`, ajuste `TLS_CLUSTER_ISSUER` (ex.: `selfsigned-cluster-issuer` ou `letsencrypt-prod`) e reexecute os estágios (`bin/55-cert-manager.sh`, `bin/60-rancher.sh`, etc.). Caso continue sem TLS, basta utilizar HTTP para todos os endpoints internos.
+- Para reativar TLS:
+  1. Ajuste `TLS_ENABLED=1` em `env.sh` ou `secrets.env`.
+  2. Defina `TLS_CLUSTER_ISSUER` (ex.: `selfsigned-cluster-issuer` ou o emissor ACME configurado).
+  3. Execute `bin/55-cert-manager.sh` para reinstalar o cert-manager (se necessário) e emitir o `ClusterIssuer`.
+  4. Reaplique os estágios que expõem ingressos (`bin/60-rancher.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`, `bin/90-vcluster.sh`) para restaurar HTTPS.
+  5. Se tiver tuneado `RANCHER_REPLICAS` ou `RANCHER_STARTUP_FAILURE_THRESHOLD` apenas para o modo HTTP, reavalie os valores ao voltar para TLS.
+- Caso permaneça sem TLS, use apenas acessos HTTP dentro da rede corporativa; a emissão via cert-manager continua disponível quando desejar.
 - Scripts conferem se já foram executados antes de prosseguir; repetições são seguras e úteis para correção de falhas.
 - Após o passo do ingress, o IP dinamicamente alocado e os hosts derivados ficam persistidos em `${STATE_DIR}/dynamic.env`.
 - Cuidado com recursos: requests/limits foram dimensionados para VMs de 4 GB RAM.

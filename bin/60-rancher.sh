@@ -9,6 +9,8 @@ donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 require_commands kubectl
 ensure_helm
 : "${RANCHER_ADMIN_PASSWORD:?defina RANCHER_ADMIN_PASSWORD em secrets.env}"
+RANCHER_REPLICAS="${RANCHER_REPLICAS:-1}"
+RANCHER_STARTUP_FAILURE_THRESHOLD="${RANCHER_STARTUP_FAILURE_THRESHOLD:-30}"
 helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
 helm repo update
 kubectl create ns cattle-system || true
@@ -57,14 +59,19 @@ helm_args=(
   upgrade -i rancher "${chart_source}" -n cattle-system
   --set hostname="${RANCHER_HOSTNAME}"
   --set bootstrapPassword="${RANCHER_ADMIN_PASSWORD}"
+  --set ingress.ingressClassName="nginx"
+  --set replicas="${RANCHER_REPLICAS}"
+  --set startupProbe.failureThreshold="${RANCHER_STARTUP_FAILURE_THRESHOLD}"
 )
 
 if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   helm_args+=(--set ingress.tls.source=secret --set privateCA=true)
 else
-  helm_args+=(--set-string ingress.extraAnnotations.\"nginx\\.ingress\\.kubernetes\\.io/ssl-redirect\"=false)
+  helm_args+=(--set tls=external)
+  helm_args+=(--set-string ingress.extraAnnotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=false)
 fi
 
+log "Executando Helm com os argumentos: ${helm_args[*]}"
 helm "${helm_args[@]}"
 
 for _ in {1..30}; do
@@ -159,5 +166,10 @@ if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
 else
   log "Rancher disponível em http://${RANCHER_HOSTNAME} e http://${RANCHER_LOCAL_HOSTNAME}"
 fi
+if [[ "${TLS_ENABLED:-0}" != "1" ]]; then
+  log "Se estiver migrando de uma instalação antiga, force o Ingress class para nginx: kubectl -n cattle-system patch ingress rancher --type merge -p '{\"spec\":{\"ingressClassName\":\"nginx\"}}'"
+  log "e reescreva a anotação: kubectl -n cattle-system annotate ingress rancher kubernetes.io/ingress.class=nginx --overwrite"
+fi
+log "No primeiro acesso ao Rancher defina Settings -> Server URL para http://${RANCHER_HOSTNAME} (ou o host externo desejado)."
 
 ok "${STEP}"

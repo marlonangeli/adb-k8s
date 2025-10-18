@@ -9,6 +9,7 @@
 - Certificados emitidos pelos helpers agora ativam rotação automática e o deploy do Rancher baixa o chart localmente para ampliar a faixa `kubeVersion` quando o cluster estiver em >= 1.34 (pode-se usar `RANCHER_HELM_CHART_OVERRIDE` para um chart alternativo) (`bin/lib.sh`, `bin/60-rancher.sh`, `README.md`).
 - Adicionadas variáveis `CERT_MANAGER_ACME_*`/`TLS_CLUSTER_ISSUER` em `secrets.env` e suporte no `bin/55-cert-manager.sh` para provisionar o ClusterIssuer ACME (Let's Encrypt) automaticamente.
 - Ingress do Rancher passou a apontar para HTTP em todos os hosts, evitando 404 ao acessar via túnel (`bin/60-rancher.sh`).
+- Instalação HTTP do Rancher agora força `tls=external`, define explicitamente `ingressClassName=nginx`, ajusta o default para 1 réplica e estende a `startupProbe` (`RANCHER_REPLICAS`, `RANCHER_STARTUP_FAILURE_THRESHOLD`) para evitar CrashLoop e remover dependência do cert-manager; documentação atualizada com o passo a passo para reativar TLS (`bin/60-rancher.sh`, `README.md`).
 - Adicionado script `scripts/install-cli-deps.sh` para instalar/verificar CLIs essenciais (kubeadm/kubectl/kubelet, Helm, Cilium CLI, vcluster, Argo CD) e documentada sua utilização opcional (`README.md`).
 
 ## 2025-10-16
