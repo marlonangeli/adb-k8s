@@ -373,33 +373,67 @@ HUBBLE_LOCAL_HOSTNAME=$(local_sslip_host "hubble")
 save_state_var "HUBBLE_HOSTNAME" "${HUBBLE_HOSTNAME}"
 save_state_var "HUBBLE_LOCAL_HOSTNAME" "${HUBBLE_LOCAL_HOSTNAME}"
 
-hubble_host_was_set=0
-if [[ ${HUBBLE_HOST+x} ]]; then
-  hubble_host_was_set=1
-  prev_hubble_host="${HUBBLE_HOST}"
-fi
-apply_certificate "kube-system" "hubble-tls" "hubble-tls" "${INGRESS_IP}" \
-  "${HUBBLE_HOSTNAME}" "${HUBBLE_LOCAL_HOSTNAME}"
+if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
+  hubble_host_was_set=0
+  if [[ ${HUBBLE_HOST+x} ]]; then
+    hubble_host_was_set=1
+    prev_hubble_host="${HUBBLE_HOST}"
+  fi
+  apply_certificate "kube-system" "hubble-tls" "hubble-tls" "${INGRESS_IP}" \
+    "${HUBBLE_HOSTNAME}" "${HUBBLE_LOCAL_HOSTNAME}"
 
-hubble_local_host_was_set=0
-if [[ ${HUBBLE_LOCAL_HOST+x} ]]; then
-  hubble_local_host_was_set=1
-  prev_hubble_local_host="${HUBBLE_LOCAL_HOST}"
-fi
-export HUBBLE_HOST="${HUBBLE_HOSTNAME}"
-export HUBBLE_LOCAL_HOST="${HUBBLE_LOCAL_HOSTNAME}"
-hubble_ingress=$(render_template "${ROOT_DIR}/manifests/hubble.ingress.yaml")
-if (( hubble_host_was_set )); then
-  export HUBBLE_HOST="${prev_hubble_host}"
+  hubble_local_host_was_set=0
+  if [[ ${HUBBLE_LOCAL_HOST+x} ]]; then
+    hubble_local_host_was_set=1
+    prev_hubble_local_host="${HUBBLE_LOCAL_HOST}"
+  fi
+  export HUBBLE_HOST="${HUBBLE_HOSTNAME}"
+  export HUBBLE_LOCAL_HOST="${HUBBLE_LOCAL_HOSTNAME}"
+  hubble_ingress=$(render_template "${ROOT_DIR}/manifests/hubble.ingress.yaml")
+  if (( hubble_host_was_set )); then
+    export HUBBLE_HOST="${prev_hubble_host}"
+  else
+    unset HUBBLE_HOST
+  fi
+  if (( hubble_local_host_was_set )); then
+    export HUBBLE_LOCAL_HOST="${prev_hubble_local_host}"
+  else
+    unset HUBBLE_LOCAL_HOST
+  fi
+  kubectl apply -f "${hubble_ingress}"
+  log "Hubble UI disponível em https://${HUBBLE_HOSTNAME} e https://${HUBBLE_LOCAL_HOSTNAME}"
 else
-  unset HUBBLE_HOST
+  kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hubble-ui
+  namespace: kube-system
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: ${HUBBLE_HOSTNAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hubble-ui
+            port:
+              number: 80
+  - host: ${HUBBLE_LOCAL_HOSTNAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: hubble-ui
+            port:
+              number: 80
+EOF
+  log "Hubble UI disponível em http://${HUBBLE_HOSTNAME} e http://${HUBBLE_LOCAL_HOSTNAME}"
 fi
-if (( hubble_local_host_was_set )); then
-  export HUBBLE_LOCAL_HOST="${prev_hubble_local_host}"
-else
-  unset HUBBLE_LOCAL_HOST
-fi
-kubectl apply -f "${hubble_ingress}"
-log "Hubble UI disponível em https://${HUBBLE_HOSTNAME} e https://${HUBBLE_LOCAL_HOSTNAME}"
 
 ok "${STEP}"

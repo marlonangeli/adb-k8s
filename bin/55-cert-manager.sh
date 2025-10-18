@@ -6,6 +6,12 @@ source "$(dirname "$0")/lib.sh"
 STEP="cert-manager"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+if [[ "${TLS_ENABLED:-0}" != "1" ]]; then
+  log "TLS desabilitado nas variáveis de ambiente; pulando instalação do cert-manager."
+  ok "${STEP}"
+  exit 0
+fi
+
 require_commands kubectl helm
 ensure_helm
 : "${TLS_CLUSTER_ISSUER:?defina TLS_CLUSTER_ISSUER em env.sh}"
@@ -64,6 +70,30 @@ spec:
   ca:
     secretName: cluster-root-ca
 EOF
+
+if [[ -n "${CERT_MANAGER_ACME_EMAIL:-}" ]]; then
+  ACME_ISSUER_NAME="${CERT_MANAGER_ACME_ISSUER_NAME:-letsencrypt-prod}"
+  ACME_SERVER="${CERT_MANAGER_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
+  ACME_INGRESS_CLASS="${CERT_MANAGER_ACME_INGRESS_CLASS:-nginx}"
+
+  kubectl apply -f - <<EOF
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: ${ACME_ISSUER_NAME}
+spec:
+  acme:
+    email: ${CERT_MANAGER_ACME_EMAIL}
+    server: ${ACME_SERVER}
+    privateKeySecretRef:
+      name: ${ACME_ISSUER_NAME}-account-key
+    solvers:
+    - http01:
+        ingress:
+          class: ${ACME_INGRESS_CLASS}
+EOF
+  log "ClusterIssuer ACME '${ACME_ISSUER_NAME}' configurado (email ${CERT_MANAGER_ACME_EMAIL}). Ajuste TLS_CLUSTER_ISSUER=${ACME_ISSUER_NAME} em env/secrets se desejar usar certificados públicos."
+fi
 
 log "cert-manager instalado com emissor padrão ${TLS_CLUSTER_ISSUER}"
 ok "${STEP}"

@@ -4,9 +4,9 @@
 
 ### Visão Geral
 
-- Cluster Kubernetes bare-metal com **Cilium** (kube-proxy-free + Hubble), **MetalLB** (L2), **Ingress-NGINX**, **cert-manager** para TLS automatizado, **Rancher**, observabilidade (**kube-prometheus-stack/Grafana**), **Longhorn** e **vcluster** para isolamento multi-tenant.
+- Cluster Kubernetes bare-metal com **Cilium** (kube-proxy-free + Hubble), **MetalLB** (L2), **Ingress-NGINX**, automações opcionais de **cert-manager** (TLS desabilitado por padrão), **Rancher**, observabilidade (**kube-prometheus-stack/Grafana**), **Longhorn** e **vcluster** para isolamento multi-tenant.
 - Scripts idempotentes, executados como root, guardam estado em `${STATE_DIR}` (padrão em `/var/opt/cluster-state`) e registram logs em `${LOG_FILE}` (padrão em `/var/log/cluster-install.log`).
-- Certificados TLS são emitidos pelo cert-manager para Rancher, Grafana, Longhorn e Hubble, com suporte a aliases `sslip.io` locais para tunelamento.
+- TLS pode ser habilitado via cert-manager (aliases `sslip.io` disponíveis), porém o fluxo atual opera totalmente em HTTP para simplificar o acesso dentro da rede da UTFPR.
 
 ### Topologia
 
@@ -57,7 +57,7 @@
 ### Preparação
 
 1. (Opcional, recomendado em ambientes novos) Execute `scripts/install-cli-deps.sh` como root para instalar/atualizar automaticamente `kubeadm`, `kubectl`, `kubelet`, Helm, Cilium CLI, vcluster e Argo CD (requer conexão externa e `curl`, `tar`, `gpg`).
-2. Copie `secrets.env.example` para `secrets.env` e defina as senhas de Grafana, Rancher, Argo CD (e demais serviços que usar).
+2. Copie `secrets.env.example` para `secrets.env` e defina as senhas de Grafana, Rancher, Argo CD (e demais serviços que usar). TLS está desligado (`TLS_ENABLED=0` em `env.sh`); preencha `CERT_MANAGER_ACME_EMAIL` e exporte `TLS_ENABLED=1`/`TLS_CLUSTER_ISSUER` se desejar reativar certificados.
 3. Ajuste `env.sh` conforme necessário (IPs, ranges, overrides de host, opções de SSH).
 4. Garanta acesso SSH como root entre o nó de controle e os demais (chaves ou senha).
 5. Opcional: teste conectividade com `bin/run-on-nodes.sh bin/10-so-requirements.sh --hosts "192.168.30.53" -- --help` (será solicitado o password de root via `su -`).
@@ -74,7 +74,8 @@
    - Execuções manuais continuam possíveis (`ssh utfpr@IP`, `su -`, `~/join-worker.sh`) ou com `bin/run-on-nodes.sh`, mas o estágio agora garante idempotência e evita reprocessar nós já integrados.
 5. **LoadBalancer** – `bin/40-metallb.sh`: instala operador + pool L2.
 6. **Ingress** – `bin/50-ingress-nginx.sh`: instala via Helm; captura automaticamente o IP atribuído pelo MetalLB (armazenado em `${STATE_DIR}/dynamic.env`).
-7. **Cert-manager** – `bin/55-cert-manager.sh`: instala o chart oficial, cria CA interna e registra o emissor `${TLS_CLUSTER_ISSUER}`.
+7. **Cert-manager** – `bin/55-cert-manager.sh`: desativado quando `TLS_ENABLED=0` (padrão). Reative ajustando `TLS_ENABLED=1`/`TLS_CLUSTER_ISSUER`.
+   - Se TLS estiver ativo e `CERT_MANAGER_ACME_EMAIL` estiver definido, o script também cria o `ClusterIssuer` ACME (`letsencrypt-prod` por padrão).
 8. **Planos superiores** (no control-plane):
    - `bin/60-rancher.sh`: instala Helm chart, emite certificado via cert-manager e adiciona host local `rancher.127-0-0-1.sslip.io`.
      Para clusters >= 1.34 o script baixa o chart localmente e relaxa a restrição `kubeVersion` para permitir a instalação (opcionalmente, defina `RANCHER_HELM_CHART_OVERRIDE` para apontar um chart já compatível).
@@ -96,15 +97,15 @@ Todos os scripts validam dependências, instalam CLIs ausentes (Helm, Cilium, vc
   ```
 - Acessos:
   - Carregue os dados dinâmicos: `source ${STATE_DIR}/dynamic.env`
-  - Rancher: `https://${RANCHER_HOSTNAME}` (ou `https://${RANCHER_LOCAL_HOSTNAME}` via túnel); login inicial controlado por `RANCHER_ADMIN_PASSWORD`.
-  - Grafana: `https://${GRAFANA_HOSTNAME}` (ou `https://${GRAFANA_LOCAL_HOSTNAME}`); credenciais em `secrets.env`.
-  - Longhorn: `https://${LONGHORN_HOSTNAME}` (ou `https://${LONGHORN_LOCAL_HOSTNAME}`).
-  - Hubble UI: `https://${HUBBLE_HOSTNAME}` (ou `https://${HUBBLE_LOCAL_HOSTNAME}`).
+  - Rancher: `http://${RANCHER_HOSTNAME}` (ou `http://${RANCHER_LOCAL_HOSTNAME}` via túnel); login inicial controlado por `RANCHER_ADMIN_PASSWORD`.
+  - Grafana: `http://${GRAFANA_HOSTNAME}` (ou `http://${GRAFANA_LOCAL_HOSTNAME}`); credenciais em `secrets.env`.
+  - Longhorn: `http://${LONGHORN_HOSTNAME}` (ou `http://${LONGHORN_LOCAL_HOSTNAME}`).
+  - Hubble UI: `http://${HUBBLE_HOSTNAME}` (ou `http://${HUBBLE_LOCAL_HOSTNAME}`).
 - Personalize hostnames adicionando entradas no `/etc/hosts` se preferir evitar sslip.io.
 
 ### Notas Importantes
 
-- Certificados TLS usam a CA interna gerenciada pelo cert-manager; importe o segredo `cluster-root-ca` se desejar confiança no navegador.
+- Para reativar TLS, exporte `TLS_ENABLED=1`, ajuste `TLS_CLUSTER_ISSUER` (ex.: `selfsigned-cluster-issuer` ou `letsencrypt-prod`) e reexecute os estágios (`bin/55-cert-manager.sh`, `bin/60-rancher.sh`, etc.). Caso continue sem TLS, basta utilizar HTTP para todos os endpoints internos.
 - Scripts conferem se já foram executados antes de prosseguir; repetições são seguras e úteis para correção de falhas.
 - Após o passo do ingress, o IP dinamicamente alocado e os hosts derivados ficam persistidos em `${STATE_DIR}/dynamic.env`.
 - Cuidado com recursos: requests/limits foram dimensionados para VMs de 4 GB RAM.

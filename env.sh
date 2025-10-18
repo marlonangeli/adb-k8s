@@ -30,6 +30,7 @@ export HUBBLE_HOST_OVERRIDE=""
 export INGRESS_HOST_TEMPLATE="%s.%s.sslip.io"
 
 # TLS
+export TLS_ENABLED="${TLS_ENABLED:-0}"
 export TLS_CLUSTER_ISSUER="${TLS_CLUSTER_ISSUER:-selfsigned-cluster-issuer}"
 
 # Estado / logs

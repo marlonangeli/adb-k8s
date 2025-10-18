@@ -115,6 +115,10 @@ local_sslip_host() {
 }
 
 apply_certificate() {
+  if [[ "${TLS_ENABLED:-0}" != "1" ]]; then
+    log "TLS desabilitado; ignorando emissão de certificado para $1/$2"
+    return 0
+  fi
   local namespace="$1"
   local certificate_name="$2"
   local secret_name="$3"

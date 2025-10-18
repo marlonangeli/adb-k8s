@@ -44,33 +44,67 @@ LONGHORN_LOCAL_HOSTNAME=$(local_sslip_host "longhorn")
 save_state_var "LONGHORN_HOSTNAME" "${LONGHORN_HOSTNAME}"
 save_state_var "LONGHORN_LOCAL_HOSTNAME" "${LONGHORN_LOCAL_HOSTNAME}"
 
-apply_certificate "longhorn-system" "longhorn-tls" "longhorn-tls" "${INGRESS_IP}" \
-  "${LONGHORN_HOSTNAME}" "${LONGHORN_LOCAL_HOSTNAME}"
+if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
+  apply_certificate "longhorn-system" "longhorn-tls" "longhorn-tls" "${INGRESS_IP}" \
+    "${LONGHORN_HOSTNAME}" "${LONGHORN_LOCAL_HOSTNAME}"
 
-longhorn_host_was_set=0
-if [[ ${LONGHORN_HOST+x} ]]; then
-  longhorn_host_was_set=1
-  prev_longhorn_host="${LONGHORN_HOST}"
-fi
-longhorn_local_host_was_set=0
-if [[ ${LONGHORN_LOCAL_HOST+x} ]]; then
-  longhorn_local_host_was_set=1
-  prev_longhorn_local_host="${LONGHORN_LOCAL_HOST}"
-fi
-export LONGHORN_HOST="${LONGHORN_HOSTNAME}"
-export LONGHORN_LOCAL_HOST="${LONGHORN_LOCAL_HOSTNAME}"
-ingress_file=$(render_template "${ROOT_DIR}/manifests/longhorn.ingress.yaml")
-if (( longhorn_host_was_set )); then
-  export LONGHORN_HOST="${prev_longhorn_host}"
+  longhorn_host_was_set=0
+  if [[ ${LONGHORN_HOST+x} ]]; then
+    longhorn_host_was_set=1
+    prev_longhorn_host="${LONGHORN_HOST}"
+  fi
+  longhorn_local_host_was_set=0
+  if [[ ${LONGHORN_LOCAL_HOST+x} ]]; then
+    longhorn_local_host_was_set=1
+    prev_longhorn_local_host="${LONGHORN_LOCAL_HOST}"
+  fi
+  export LONGHORN_HOST="${LONGHORN_HOSTNAME}"
+  export LONGHORN_LOCAL_HOST="${LONGHORN_LOCAL_HOSTNAME}"
+  ingress_file=$(render_template "${ROOT_DIR}/manifests/longhorn.ingress.yaml")
+  if (( longhorn_host_was_set )); then
+    export LONGHORN_HOST="${prev_longhorn_host}"
+  else
+    unset LONGHORN_HOST
+  fi
+  if (( longhorn_local_host_was_set )); then
+    export LONGHORN_LOCAL_HOST="${prev_longhorn_local_host}"
+  else
+    unset LONGHORN_LOCAL_HOST
+  fi
+  kubectl apply -f "${ingress_file}"
+  log "Longhorn UI disponível em https://${LONGHORN_HOSTNAME} e https://${LONGHORN_LOCAL_HOSTNAME}"
 else
-  unset LONGHORN_HOST
+  kubectl apply -f - <<EOF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: longhorn
+  namespace: longhorn-system
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: ${LONGHORN_HOSTNAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: longhorn-frontend
+            port:
+              number: 80
+  - host: ${LONGHORN_LOCAL_HOSTNAME}
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: longhorn-frontend
+            port:
+              number: 80
+EOF
+  log "Longhorn UI disponível em http://${LONGHORN_HOSTNAME} e http://${LONGHORN_LOCAL_HOSTNAME}"
 fi
-if (( longhorn_local_host_was_set )); then
-  export LONGHORN_LOCAL_HOST="${prev_longhorn_local_host}"
-else
-  unset LONGHORN_LOCAL_HOST
-fi
-kubectl apply -f "${ingress_file}"
-log "Longhorn UI disponível em https://${LONGHORN_HOSTNAME} e https://${LONGHORN_LOCAL_HOSTNAME}"
 
 ok "${STEP}"
