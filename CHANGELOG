@@ -5,6 +5,7 @@
 - Criado `scripts/worker-join.sh` para executar `kubeadm join` de forma idempotente diretamente nas máquinas alvo.
 - `bin/run-on-nodes.sh` agora aceita flags após o caminho do script e o fluxo SSH passou a reutilizar conexões (`env.sh`/`bin/lib.sh`), reduzindo múltiplos prompts de senha.
 - Documentação atualizada descrevendo o novo estágio na sequência de provisionamento (`README.md`).
+- Instalação do cert-manager ajustada para usar `crds.enabled` e definir a `rotationPolicy` do certificado raiz, eliminando avisos pós-instalação (`bin/55-cert-manager.sh`).
 
 ## 2025-10-16
 - Adotado formato `sslip.io` com IPs em `dash` e aliases locais `<serviço>.127-0-0-1.sslip.io` em todos os ingress.

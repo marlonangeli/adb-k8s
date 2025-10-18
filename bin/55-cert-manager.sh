@@ -15,7 +15,7 @@ helm repo update
 
 kubectl create ns cert-manager || true
 helm upgrade -i cert-manager jetstack/cert-manager -n cert-manager \
-  --set installCRDs=true \
+  --set crds.enabled=true \
   --set extraArgs[0]=--enable-certificate-owner-ref=true
 
 kubectl -n cert-manager rollout status deploy/cert-manager --timeout=120s
@@ -43,6 +43,8 @@ spec:
   isCA: true
   secretName: cluster-root-ca
   commonName: cluster-root-ca
+  privateKey:
+    rotationPolicy: Always
   subject:
     organizations:
     - UTFPR Lab
