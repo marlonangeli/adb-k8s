@@ -29,14 +29,85 @@ fi
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo update
 
+chart_tmp=""
+chart_source="prometheus-community/kube-prometheus-stack"
+trap_cleanup=false
+
+cleanup_chart_dir() {
+  if [[ "${trap_cleanup}" == true && -n "${chart_tmp}" && -d "${chart_tmp}" ]]; then
+    rm -rf "${chart_tmp}"
+  fi
+}
+trap cleanup_chart_dir EXIT
+
+# Pré-carrega o chart para aplicar CRDs de maneira sequencial (reduz pico no apiserver)
+chart_tmp=$(mktemp -d)
+trap_cleanup=true
+helm pull prometheus-community/kube-prometheus-stack --untar --untardir "${chart_tmp}"
+chart_dir="${chart_tmp}/kube-prometheus-stack"
+if [[ ! -d "${chart_dir}" ]]; then
+  log "chart kube-prometheus-stack não encontrado após helm pull."
+  exit 1
+fi
+chart_source="${chart_dir}"
+
+if ! kubectl get crd prometheuses.monitoring.coreos.com >/dev/null 2>&1; then
+  log "Aplicando CRDs do kube-prometheus-stack de forma controlada"
+  for crd_file in "${chart_dir}"/crds/*.yaml; do
+    crd_name=$(awk '/^  name: /{print $2; exit}' "${crd_file}")
+    if [[ -z "${crd_name}" ]]; then
+      crd_name=$(basename "${crd_file}" .yaml)
+    fi
+    log "Aplicando CRD ${crd_name}"
+    until kubectl apply -f "${crd_file}"; do
+      log "falha ao aplicar ${crd_name}, tentando novamente em 5s"
+      sleep 5
+    done
+    kubectl wait --for=condition=Established --timeout=120s "crd/${crd_name}" >/dev/null 2>&1 || true
+    sleep 1
+  done
+else
+  log "CRDs do kube-prometheus-stack já existentes; pulando reaplicação."
+fi
+
 helm_args=(
-  upgrade -i kube-prometheus-stack prometheus-community/kube-prometheus-stack -n monitoring
+  upgrade --debug -i kube-prometheus-stack "${chart_source}" -n monitoring
+  --skip-crds
+  --atomic
+  --timeout 15m
   --set grafana.adminUser="${GRAFANA_ADMIN_USER}"
   --set grafana.adminPassword="${GRAFANA_ADMIN_PASSWORD}"
   --set grafana.ingress.enabled=true
   --set grafana.ingress.ingressClassName=nginx
   --set grafana.ingress.hosts[0]="${GRAFANA_HOSTNAME}"
   --set grafana.ingress.hosts[1]="${GRAFANA_LOCAL_HOSTNAME}"
+  --set grafana.resources.requests.cpu=100m
+  --set grafana.resources.requests.memory=256Mi
+  --set grafana.resources.limits.cpu=500m
+  --set grafana.resources.limits.memory=512Mi
+  --set prometheusOperator.resources.requests.cpu=100m
+  --set prometheusOperator.resources.requests.memory=256Mi
+  --set prometheusOperator.resources.limits.cpu=400m
+  --set prometheusOperator.resources.limits.memory=512Mi
+  --set kubeStateMetrics.resources.requests.cpu=100m
+  --set kubeStateMetrics.resources.requests.memory=256Mi
+  --set kubeStateMetrics.resources.limits.cpu=300m
+  --set kubeStateMetrics.resources.limits.memory=384Mi
+  --set nodeExporter.resources.requests.cpu=50m
+  --set nodeExporter.resources.requests.memory=64Mi
+  --set nodeExporter.resources.limits.cpu=200m
+  --set nodeExporter.resources.limits.memory=256Mi
+  --set prometheus.prometheusSpec.resources.requests.cpu=250m
+  --set prometheus.prometheusSpec.resources.requests.memory=640Mi
+  --set prometheus.prometheusSpec.resources.limits.cpu=800m
+  --set prometheus.prometheusSpec.resources.limits.memory=1.5Gi
+  --set prometheus.prometheusSpec.retention=24h
+  --set kubeScheduler.enabled=false
+  --set kubeControllerManager.enabled=false
+  --set kubeEtcd.enabled=false
+  --set kubeProxy.enabled=false
+  --set alertmanager.enabled=false
+  --set global.scrapeInterval=45s
 )
 
 if [[ "${TLS_ENABLED:-0}" == "1" ]]; then

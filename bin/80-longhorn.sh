@@ -25,7 +25,7 @@ helm repo update
 kubectl create ns longhorn-system || true
 
 helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
-  --set defaultSettings.defaultReplicaCount=2
+  --set-string defaultSettings.defaultReplicaCount="2"
 
 log "validando rollout do Longhorn"
 wait_rollout longhorn-system deployment longhorn-ui

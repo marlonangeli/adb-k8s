@@ -1,5 +1,9 @@
 # Changelog
 
+## 2025-10-18
+- Observabilidade revisada para ambientes 4 GB: `bin/70-observability.sh` agora pré-aplica os CRDs do kube-prometheus-stack de forma sequencial, usa `--skip-crds/--atomic`, desabilita componentes kube-* pesados (scheduler/controller-manager/etcd/kube-proxy, Alertmanager), reduz requests/limits, define retenção de 24h e ajusta o `scrapeInterval` para aliviar o API server. Documentação atualizada com as novas orientações (`README.md`).
+- Instalação do Longhorn ajustada para passar `defaultReplicaCount` como string, evitando erro de renderização do chart (`bin/80-longhorn.sh`). README simplificado com fluxo rápido e checagens essenciais.
+
 ## 2025-10-17
 - Orquestração dos workers automatizada com `bin/35-join-workers.sh`/`make workers`, garantindo execução antes do MetalLB e evitando reprocessar nós já presentes.
 - Criado `scripts/worker-join.sh` para executar `kubeadm join` de forma idempotente diretamente nas máquinas alvo.

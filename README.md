@@ -62,50 +62,37 @@
 4. Garanta acesso SSH como root entre o nó de controle e os demais (chaves ou senha).
 5. Opcional: teste conectividade com `bin/run-on-nodes.sh bin/10-so-requirements.sh --hosts "192.168.30.53" -- --help` (será solicitado o password de root via `su -`).
 
-### Fluxo de Provisionamento
+### Fluxo rápido
 
-1. **Prep SO** – `bin/10-so-requirements.sh` em todas as VMs (entre como `ssh utfpr@IP`, faça `su -` e execute manualmente, ou use `bin/run-on-nodes.sh` para orquestrar com prompts de senha de root). Pode ser utilizado com `bin/run-on-nodes.sh`:
-   ```bash
-   bin/run-on-nodes.sh bin/10-so-requirements.sh --all
-   ```
-2. **Control-plane** – `bin/20-kubeadm-init.sh`: kubeadm init sem kube-proxy, gera `~/join-worker.sh`.
-3. **Rede** – `bin/30-cilium.sh`: garante Cilium CLI e aplica Cilium v1.18 com Hubble.
-4. **Workers** – `bin/35-join-workers.sh`: utiliza o `~/join-worker.sh` gerado no passo anterior, sincroniza o repositório nos hosts de `WORKERS`, verifica se já fazem parte do cluster e executa `kubeadm join` apenas onde necessário. Disponível via `make workers` ou incluso em `make all`.
-   - Execuções manuais continuam possíveis (`ssh utfpr@IP`, `su -`, `~/join-worker.sh`) ou com `bin/run-on-nodes.sh`, mas o estágio agora garante idempotência e evita reprocessar nós já integrados.
-5. **LoadBalancer** – `bin/40-metallb.sh`: instala operador + pool L2.
-6. **Ingress** – `bin/50-ingress-nginx.sh`: instala via Helm; captura automaticamente o IP atribuído pelo MetalLB (armazenado em `${STATE_DIR}/dynamic.env`).
-7. **Cert-manager** – `bin/55-cert-manager.sh`: desativado quando `TLS_ENABLED=0` (padrão). Reative ajustando `TLS_ENABLED=1`/`TLS_CLUSTER_ISSUER`.
-   - Se TLS estiver ativo e `CERT_MANAGER_ACME_EMAIL` estiver definido, o script também cria o `ClusterIssuer` ACME (`letsencrypt-prod` por padrão).
-8. **Planos superiores** (no control-plane):
-   - `bin/60-rancher.sh`: instala o chart do Rancher em modo HTTP (TLS externo) com `ingressClassName=nginx`, adiciona o host local `rancher.127-0-0-1.sslip.io`, reduz o padrão de réplicas para 1 (`RANCHER_REPLICAS`) e alonga a `startupProbe` para clusters mais lentos (`RANCHER_STARTUP_FAILURE_THRESHOLD`).
-     - Se estiver reaplicando após uma versão anterior do script, ajuste manualmente o Ingress existente:  
-       `kubectl -n cattle-system patch ingress rancher --type merge -p '{"spec":{"ingressClassName":"nginx"}}'`  
-       `kubectl -n cattle-system annotate ingress rancher kubernetes.io/ingress.class=nginx --overwrite`
-     Para clusters >= 1.34 o script baixa o chart localmente e relaxa a restrição `kubeVersion` para permitir a instalação (opcionalmente, defina `RANCHER_HELM_CHART_OVERRIDE` para apontar um chart já compatível).
-   - `bin/70-observability.sh`: kube-prometheus-stack com ingress Grafana em HTTPS + alias local para túnel.
-   - `bin/80-longhorn.sh`: Helm + ingress HTTPS do Longhorn emitido pelo cert-manager.
-   - `bin/90-vcluster.sh`: instala CLI, cria tenant/shared, aplica CNP e ingress HTTPS do Hubble com host local.
+1. `bin/10-so-requirements.sh` (pode usar `bin/run-on-nodes.sh ... --all`).
+2. `bin/20-kubeadm-init.sh` no control-plane (guarde o `~/join-worker.sh`).
+3. `bin/30-cilium.sh` para rede/Hubble.
+4. `bin/35-join-workers.sh` ou `make workers`.
+5. `bin/40-metallb.sh` → `bin/50-ingress-nginx.sh` (VIP em `${STATE_DIR}/dynamic.env`).
+6. `bin/55-cert-manager.sh` apenas se `TLS_ENABLED=1`.
+7. `bin/60-rancher.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`, `bin/90-vcluster.sh`.
 
-Todos os scripts validam dependências, instalam CLIs ausentes (Helm, Cilium, vcluster) e limpam artefatos temporários automaticamente. Use `make <alvo>` para orquestrar se preferir.
+### Verificações rápidas
 
-### Operação
+```bash
+kubectl get nodes -o wide
+cilium status
+kubectl -n metallb-system get ipaddresspools,l2advertisements
+kubectl -n ingress-nginx get svc ingress-nginx-controller -o wide
+kubectl get ingress -A
+kubectl -n monitoring get pods
+kubectl -n kube-system get pods -l k8s-app=hubble-ui
+kubectl -n kube-system get pods -l k8s-app=hubble-relay
+```
 
-- Após a inicialização, valide:
-  ```bash
-  kubectl get nodes -o wide
-  cilium status
-  kubectl -n metallb-system get ipaddresspools,l2advertisements
-  kubectl -n ingress-nginx get svc ingress-nginx-controller -o wide
-  kubectl get ingress -A
-  ```
-- Acessos:
-  - Carregue os dados dinâmicos: `source ${STATE_DIR}/dynamic.env`
-  - Rancher: `http://${RANCHER_HOSTNAME}` (ou `http://${RANCHER_LOCAL_HOSTNAME}` via túnel); login inicial controlado por `RANCHER_ADMIN_PASSWORD`.
-    Após o primeiro acesso, defina *Settings → Server URL* para `http://${RANCHER_HOSTNAME}` (ou para o host externo que será utilizado pelos demais nós).
-  - Grafana: `http://${GRAFANA_HOSTNAME}` (ou `http://${GRAFANA_LOCAL_HOSTNAME}`); credenciais em `secrets.env`.
-  - Longhorn: `http://${LONGHORN_HOSTNAME}` (ou `http://${LONGHORN_LOCAL_HOSTNAME}`).
-  - Hubble UI: `http://${HUBBLE_HOSTNAME}` (ou `http://${HUBBLE_LOCAL_HOSTNAME}`).
-- Personalize hostnames adicionando entradas no `/etc/hosts` se preferir evitar sslip.io.
+### Endpoints úteis
+
+- Rancher: `http://${RANCHER_HOSTNAME}` / `http://${RANCHER_LOCAL_HOSTNAME}`.
+- Grafana: `http://${GRAFANA_HOSTNAME}`.
+- Longhorn: `http://${LONGHORN_HOSTNAME}`.
+- Hubble UI: `http://${HUBBLE_HOSTNAME}`.
+
+Carregue `source ${STATE_DIR}/dynamic.env` para recuperar IPs/hosts. TLS pode ser reativado depois com `TLS_ENABLED=1` e reaplicando os scripts que criam ingressos.
 
 ### Notas Importantes
 
