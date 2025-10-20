@@ -42,7 +42,10 @@
 │   ├─ 60-rancher.sh
 │   ├─ 70-observability.sh
 │   ├─ 80-longhorn.sh
-│   └─ 90-vcluster.sh
+│   ├─ 90-vcluster.sh
+│   └─ 95-argocd.sh
+├─ scripts/
+│   └─ vcluster/          # helpers para criar/atualizar/remover vclusters manualmente
 └─ manifests/            # templates processados com envsubst
     ├─ cilium.values.yaml
     ├─ metallb-pool.yaml
@@ -56,7 +59,7 @@
 
 ### Preparação
 
-1. (Opcional, recomendado em ambientes novos) Execute `scripts/install-cli-deps.sh` como root para instalar/atualizar automaticamente `kubeadm`, `kubectl`, `kubelet`, Helm, Cilium CLI, vcluster e Argo CD (requer conexão externa e `curl`, `tar`, `gpg`).
+1. (Opcional, recomendado em ambientes novos) Execute `scripts/install-cli-deps.sh` como root para instalar/atualizar automaticamente `kubeadm`, `kubectl`, `kubelet`, Helm, Cilium CLI, vcluster, Kustomize e Argo CD (requer conexão externa e `curl`, `tar`, `gpg`).
 2. Copie `secrets.env.example` para `secrets.env` e defina as senhas de Grafana, Rancher, Argo CD (e demais serviços que usar). TLS está desligado (`TLS_ENABLED=0` em `env.sh`); preencha `CERT_MANAGER_ACME_EMAIL` e exporte `TLS_ENABLED=1`/`TLS_CLUSTER_ISSUER` se desejar reativar certificados.
 3. Ajuste `env.sh` conforme necessário (IPs, ranges, overrides de host, opções de SSH).
 4. Garanta acesso SSH como root entre o nó de controle e os demais (chaves ou senha).
@@ -71,6 +74,26 @@
 5. `bin/40-metallb.sh` → `bin/50-ingress-nginx.sh` (VIP em `${STATE_DIR}/dynamic.env`).
 6. `bin/55-cert-manager.sh` apenas se `TLS_ENABLED=1`.
 7. `bin/60-rancher.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`, `bin/90-vcluster.sh`.
+8. `bin/95-argocd.sh` para instalar o Argo CD, registrar os vClusters e criar as Applications GitOps.
+
+### Provisionamento de novos tenants
+
+1. Crie o vCluster com `scripts/vcluster/create.sh --tenant <tenant> --profile private`. O script valida nomes (`[a-z0-9-]+`), aplica políticas Cilium e gera/atualiza os overlays em `adb-api-3/k8s/tenants/<tenant>` com hosts baseados no IP alocado (`api-<tenant>.<ip>.sslip.io`).
+2. Execute `bin/95-argocd.sh` para registrar o novo vCluster no Argo CD. O script verifica se o cluster já está configurado e reaproveita o secret quando o endpoint é o mesmo.
+3. Consulte `${STATE_DIR}/dynamic.env` para recuperar variáveis como `VCLUSTER_<TENANT>_SERVICE_IP`, `VCLUSTER_<TENANT>_API_HOST` e `VCLUSTER_SHARED_INTERPOLATION_HOST`.
+4. Exporte os kubeconfigs publicados no namespace `monitoring` e importe-os no Grafana/Hubble para análise pós-teste:
+   ```bash
+   kubectl -n monitoring get secret vcluster-<tenant>-kubeconfig \
+     -o jsonpath='{.data.kubeconfig}' | base64 -d > <tenant>.kubeconfig
+   ```
+5. Ajuste `adb-api-3/k8s/tenants/<tenant>/secrets.env` com credenciais reais antes do deploy GitOps.
+6. Para remover ambientes de teste, utilize `scripts/vcluster/remove.sh --cluster <tenant>` (limpa namespace, kubeconfig e secret de observabilidade).
+
+### Testes e observabilidade
+
+- Utilize os scripts `tests/k6/*.js` como base para smoke, ramp-up e validação da API compartilhada; exporte os resultados (`--out json=...`) e registre no TCC.
+- Após cada execução, configure o Grafana (dados de Kubernetes) e o Hubble com os kubeconfigs exportados para coletar métricas e fluxos.
+- Consulte `docs/testing-guidelines.md` para um roteiro completo cobrindo uso de recursos, escalabilidade, segurança, GitOps e a avaliação do Liqo como trabalho futuro.
 
 ### Verificações rápidas
 

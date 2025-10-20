@@ -114,6 +114,24 @@ install_vcluster() {
   install_binary "${url}" "vcluster"
 }
 
+install_kustomize() {
+  if command -v kustomize >/dev/null 2>&1; then
+    log "kustomize já instalado"
+    return
+  fi
+  local tmp_dir
+  tmp_dir="$(mktemp -d)"
+  curl -fsSL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" -o "${tmp_dir}/install.sh"
+  chmod +x "${tmp_dir}/install.sh"
+  (cd "${tmp_dir}" && ./install.sh >/dev/null)
+  if [[ ! -f "${tmp_dir}/kustomize" ]]; then
+    echo "falha ao baixar kustomize" >&2
+    exit 1
+  fi
+  install -m 0755 "${tmp_dir}/kustomize" "${BIN_DIR}/kustomize"
+  rm -rf "${tmp_dir}"
+}
+
 install_argocd() {
   if command -v argocd >/dev/null 2>&1; then
     log "argocd já instalado"
@@ -140,6 +158,7 @@ main() {
   install_helm
   install_cilium_cli
   install_vcluster
+  install_kustomize
   install_argocd
   if command -v jq >/dev/null 2>&1; then
     install_k9s || true

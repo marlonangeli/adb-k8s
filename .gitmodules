@@ -1,0 +1,6 @@
+[submodule "adb-api-3"]
+	path = adb-api-3
+	url = https://github.com/agdatabox/adb-api-3.git
+[submodule "adb-interpolation-api"]
+	path = adb-interpolation-api
+	url = https://github.com/agdatabox/adb-interpolation-api.git

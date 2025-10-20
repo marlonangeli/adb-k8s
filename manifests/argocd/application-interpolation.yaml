@@ -1,0 +1,22 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${INTERPOLATION_APP_NAME}
+  namespace: argocd
+spec:
+  project: tenants
+  source:
+    repoURL: ${INTERPOLATION_REPO_URL}
+    targetRevision: ${INTERPOLATION_REVISION}
+    path: ${INTERPOLATION_PATH}
+    directory:
+      recurse: true
+  destination:
+    name: ${INTERPOLATION_CLUSTER_NAME}
+    namespace: ${INTERPOLATION_NAMESPACE}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

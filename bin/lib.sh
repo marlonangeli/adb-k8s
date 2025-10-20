@@ -77,6 +77,16 @@ save_state_var() {
   source "${DYNAMIC_ENV}"
 }
 
+remove_state_var() {
+  local key="$1"
+  [[ -f "${DYNAMIC_ENV}" ]] || return 0
+  local tmp
+  tmp=$(mktemp)
+  grep -v "^${key}=" "${DYNAMIC_ENV}" > "${tmp}" || true
+  mv "${tmp}" "${DYNAMIC_ENV}"
+  source "${DYNAMIC_ENV}"
+}
+
 current_ingress_ip() {
   if [[ -n "${INGRESS_VIP}" ]]; then
     echo "${INGRESS_VIP}"

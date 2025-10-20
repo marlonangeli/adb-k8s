@@ -1,0 +1,30 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: ${ARGOCD_APP_NAME}
+  namespace: argocd
+  labels:
+    adb.tenancy/tenant: ${TENANT_ID}
+spec:
+  project: tenants
+  source:
+    repoURL: ${ADB_API_REPO_URL}
+    targetRevision: ${ADB_API_REVISION}
+    path: ${ADB_API_PATH}
+    directory:
+      recurse: true
+  destination:
+    name: ${TENANT_CLUSTER_NAME}
+    namespace: ${TENANT_NAMESPACE}
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 2m
+    syncOptions:
+      - CreateNamespace=true
