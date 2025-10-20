@@ -5,9 +5,10 @@
 - Novo estágio `bin/95-argocd.sh` instala/atualiza o Argo CD, registra todos os vClusters, verifica clusters já configurados e cria Applications GitOps parametrizadas; Makefile e `env.sh` ajustados para o fluxo.
 - Manifests Kubernetes refatorados para Kustomize: `adb-api-3` passou a ter base compartilhada + overlays por tenant (Postgres com Longhorn, NetworkPolicies, HPA, Ingress `least_conn`), enquanto `adb-interpolation-api` expõe Service `LoadBalancer`, Ingress balanceado e HPA no vCluster compartilhado.
 - Preparado o ambiente de testes: scripts k6 (`tests/k6/`), documentação consolidada em `docs/testing-guidelines.md`, checkpoint em `docs/checkpoints/2025-10-19.md` e orientações de observabilidade atualizadas (Grafana/Hubble).
+- Reduzidos requests/limits dos componentes críticos (kube-prometheus-stack com retenção de 7 dias, Cilium/Hubble, Longhorn, Rancher) para diminuir o consumo ocioso mantendo estabilidade.
 
 ## 2025-10-18
-- Observabilidade revisada para ambientes 4 GB: `bin/70-observability.sh` agora pré-aplica os CRDs do kube-prometheus-stack de forma sequencial, usa `--skip-crds/--atomic`, desabilita componentes kube-* pesados (scheduler/controller-manager/etcd/kube-proxy, Alertmanager), reduz requests/limits, define retenção de 24h e ajusta o `scrapeInterval` para aliviar o API server. Documentação atualizada com as novas orientações (`README.md`).
+- Observabilidade revisada para ambientes 4 GB: `bin/70-observability.sh` agora pré-aplica os CRDs do kube-prometheus-stack de forma sequencial, usa `--skip-crds/--atomic`, desabilita componentes kube-* pesados (scheduler/controller-manager/etcd/kube-proxy, Alertmanager), reduz requests/limits, define retenção de 24h e ajusta o `scrapeInterval` para aliviar o API server. Documentação atualizada com as novas orientações (`README.md`).
 - Instalação do Longhorn ajustada para passar `defaultReplicaCount` como string, evitando erro de renderização do chart (`bin/80-longhorn.sh`). README simplificado com fluxo rápido e checagens essenciais.
 
 ## 2025-10-17

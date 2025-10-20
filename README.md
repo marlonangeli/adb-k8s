@@ -95,6 +95,13 @@
 - Após cada execução, configure o Grafana (dados de Kubernetes) e o Hubble com os kubeconfigs exportados para coletar métricas e fluxos.
 - Consulte `docs/testing-guidelines.md` para um roteiro completo cobrindo uso de recursos, escalabilidade, segurança, GitOps e a avaliação do Liqo como trabalho futuro.
 
+### Ajustes de recursos padrão
+
+- Observabilidade (kube-prometheus-stack) usa retenção de 7 dias, intervalo de scrape de 60 s e requests reduzidas (Prometheus 512 Mi/1.25 Gi, Grafana 192 Mi/384 Mi, kube-state-metrics 192 Mi/256 Mi) para caber confortavelmente em VMs de 4 GB.
+- Cilium/Hubble aplicam limites explícitos nas instâncias Relay/UI (≈100–200 Mi) para conter o uso de memória do namespace `kube-system`.
+- Longhorn, Rancher e CSI foram configurados com requests e limits moderados (UI/manager ~160–320 Mi; Rancher 384–768 Mi) preservando estabilidade sem desabilitar componentes.
+- Ajustes adicionais podem ser feitos exportando chart values customizados, mas mantenha os limites acima como baseline durante os testes do TCC.
+
 ### Verificações rápidas
 
 ```bash

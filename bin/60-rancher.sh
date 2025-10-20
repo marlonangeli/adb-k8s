@@ -62,6 +62,10 @@ helm_args=(
   --set ingress.ingressClassName="nginx"
   --set replicas="${RANCHER_REPLICAS}"
   --set startupProbe.failureThreshold="${RANCHER_STARTUP_FAILURE_THRESHOLD}"
+  --set resources.requests.cpu=250m
+  --set resources.requests.memory=384Mi
+  --set resources.limits.cpu=600m
+  --set resources.limits.memory=768Mi
 )
 
 if [[ "${TLS_ENABLED:-0}" == "1" ]]; then

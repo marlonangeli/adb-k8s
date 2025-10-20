@@ -27,9 +27,21 @@ cilium_flags=(
   --set hubble.relay.enabled=true
   --set hubble.relay.tolerations[0].key=node-role.kubernetes.io/control-plane
   --set hubble.relay.tolerations[0].operator=Exists
+  --set hubble.relay.resources.requests.cpu=50m
+  --set hubble.relay.resources.requests.memory=96Mi
+  --set hubble.relay.resources.limits.cpu=200m
+  --set hubble.relay.resources.limits.memory=192Mi
   --set hubble.ui.enabled=true
   --set hubble.ui.tolerations[0].key=node-role.kubernetes.io/control-plane
   --set hubble.ui.tolerations[0].operator=Exists
+  --set hubble.ui.backend.resources.requests.cpu=50m
+  --set hubble.ui.backend.resources.requests.memory=96Mi
+  --set hubble.ui.backend.resources.limits.cpu=200m
+  --set hubble.ui.backend.resources.limits.memory=192Mi
+  --set hubble.ui.frontend.resources.requests.cpu=25m
+  --set hubble.ui.frontend.resources.requests.memory=80Mi
+  --set hubble.ui.frontend.resources.limits.cpu=150m
+  --set hubble.ui.frontend.resources.limits.memory=160Mi
   --set hubble.metrics.enabled="{dns;drop;tcp;flow;port-distribution;icmp;http}"
 )
 

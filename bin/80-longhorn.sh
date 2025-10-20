@@ -25,7 +25,31 @@ helm repo update
 kubectl create ns longhorn-system || true
 
 helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
-  --set-string defaultSettings.defaultReplicaCount="2"
+  --set-string defaultSettings.defaultReplicaCount="2" \
+  --set longhornManager.resources.requests.cpu=120m \
+  --set longhornManager.resources.requests.memory=160Mi \
+  --set longhornManager.resources.limits.cpu=350m \
+  --set longhornManager.resources.limits.memory=320Mi \
+  --set longhornUI.resources.requests.cpu=40m \
+  --set longhornUI.resources.requests.memory=96Mi \
+  --set longhornUI.resources.limits.cpu=150m \
+  --set longhornUI.resources.limits.memory=192Mi \
+  --set csi.attacher.resources.requests.cpu=40m \
+  --set csi.attacher.resources.requests.memory=64Mi \
+  --set csi.attacher.resources.limits.cpu=120m \
+  --set csi.attacher.resources.limits.memory=128Mi \
+  --set csi.provisioner.resources.requests.cpu=40m \
+  --set csi.provisioner.resources.requests.memory=64Mi \
+  --set csi.provisioner.resources.limits.cpu=150m \
+  --set csi.provisioner.resources.limits.memory=160Mi \
+  --set csi.resizer.resources.requests.cpu=30m \
+  --set csi.resizer.resources.requests.memory=48Mi \
+  --set csi.resizer.resources.limits.cpu=100m \
+  --set csi.resizer.resources.limits.memory=96Mi \
+  --set csi.snapshotter.resources.requests.cpu=30m \
+  --set csi.snapshotter.resources.requests.memory=48Mi \
+  --set csi.snapshotter.resources.limits.cpu=100m \
+  --set csi.snapshotter.resources.limits.memory=96Mi
 
 log "validando rollout do Longhorn"
 wait_rollout longhorn-system deployment longhorn-ui
