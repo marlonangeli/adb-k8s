@@ -56,8 +56,8 @@ vc::ensure_prereqs() {
   require_commands kubectl envsubst
   ensure_vcluster_cli
 
-  VC_TENANT_MANIFEST_ROOT="${ROOT_DIR}/adb-api-3/k8s/tenants"
-  VC_INTERPOLATION_OVERLAY_DIR="${ROOT_DIR}/adb-interpolation-api/k8s/overlays/shared"
+  : "${VC_TENANT_MANIFEST_ROOT:=${ROOT_DIR}/adb-api-3/k8s/tenants}"
+  : "${VC_INTERPOLATION_OVERLAY_DIR:=${ROOT_DIR}/adb-interpolation-api/k8s/overlays/shared}"
 
   VC_INGRESS_IP="$(current_ingress_ip)"
   if [[ -z "${VC_INGRESS_IP}" ]]; then

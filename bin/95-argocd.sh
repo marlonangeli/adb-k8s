@@ -13,7 +13,7 @@ ensure_helm
 
 vc::load_defaults
 
-ARGOCD_NAMESPACE="argocd"
+ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 ARGOCD_HOSTNAME=$(resolve_hostname "${ARGOCD_HOST_OVERRIDE:-}" "argocd")
 save_state_var "ARGOCD_HOSTNAME" "${ARGOCD_HOSTNAME}"
 

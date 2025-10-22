@@ -21,12 +21,15 @@ import json, sys
 path = sys.argv[1]
 with open(path) as fh:
     data = json.load(fh)
-if data.get('spec') and data['spec'].get('finalizers'):
-    data['spec']['finalizers'] = []
+meta = data.setdefault('metadata', {})
+meta['finalizers'] = []
+spec = data.setdefault('spec', {})
+spec['finalizers'] = []
 json.dump(data, sys.stdout)
 PY
   fi
   kubectl patch namespace "${ns}" --type=merge -p '{"spec":{"finalizers":[]}}' >/dev/null 2>&1 || true
+  kubectl patch namespace "${ns}" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
   rm -f "${tmp_file}"
 }
 
@@ -52,7 +55,12 @@ log "iniciando remoção do Rancher (release=${RELEASE})"
 
 if helm -n "${PRIMARY_NS}" list --short 2>/dev/null | grep -qx "${RELEASE}"; then
   log "desinstalando release Helm ${RELEASE}"
-  helm -n "${PRIMARY_NS}" uninstall "${RELEASE}" || log "falha ao desinstalar via Helm; continuando com remoção manual"
+  if ! helm -n "${PRIMARY_NS}" uninstall "${RELEASE}"; then
+    log "falha ao desinstalar via Helm; removendo jobs residuais do chart"
+    kubectl -n "${PRIMARY_NS}" delete job rancher-post-delete --force --grace-period=0 --ignore-not-found >/dev/null 2>&1 || true
+    kubectl -n "${PRIMARY_NS}" delete job rancher-pre-delete --force --grace-period=0 --ignore-not-found >/dev/null 2>&1 || true
+    kubectl -n "${PRIMARY_NS}" delete job -l release="${RELEASE}" --force --grace-period=0 --ignore-not-found >/dev/null 2>&1 || true
+  fi
 else
   log "release Helm ${RELEASE} não encontrada (já removida?)"
 fi
@@ -119,7 +127,7 @@ sleep 5
 
 attempt=0
 while :; do
-  leftover_ns=$(kubectl get namespace 2>/dev/null | awk '/Terminating/ && /cattle|fleet|p-|user-|cluster-fleet/ {print $1}' || true)
+  leftover_ns=$(kubectl get namespace 2>/dev/null | awk '/Terminating/ && /(cattle|fleet|p-|user-|cluster-fleet|^local$|local-p-)/ {print $1}' || true)
   if [[ -z "${leftover_ns}" ]]; then
     break
   fi
@@ -136,7 +144,30 @@ while :; do
   ((attempt++))
 done
 
-leftover_ns=$(kubectl get namespace 2>/dev/null | awk '/cattle|fleet|p-|user-|cluster-fleet/ {print $1}' || true)
+aggressive_cleanup=0
+if [[ -n "${leftover_ns}" ]]; then
+  aggressive_cleanup=1
+  log "executando limpeza agressiva de namespaces residuais"
+  for ns in ${leftover_ns}; do
+    finalize_namespace "${ns}"
+  done
+fi
+
+if (( aggressive_cleanup )); then
+  log "reaplicando remoção agressiva de CRDs e APIService (se restarem)"
+  kubectl get crd | awk '/(\.cattle\.io|fleet\.cattle\.io|rancher\.io)/{print $1}' | sort -u | while read -r crd; do
+    [[ -z "${crd}" ]] && continue
+    kubectl patch crd "${crd}" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+    kubectl delete crd "${crd}" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  done
+  kubectl get apiservice | awk '/(fleet\.cattle\.io|management\.cattle\.io|rancher\.io)/{print $1}' | sort -u | while read -r api; do
+    [[ -z "${api}" ]] && continue
+    kubectl patch apiservice "${api}" --type=merge -p '{"metadata":{"finalizers":[]}}' >/dev/null 2>&1 || true
+    kubectl delete apiservice "${api}" --ignore-not-found >/dev/null 2>&1 || true
+  done
+fi
+
+leftover_ns=$(kubectl get namespace 2>/dev/null | awk '/(cattle|fleet|p-|user-|cluster-fleet|^local$|local-p-)/ {print $1}' || true)
 leftover_crds=$(kubectl get crd 2>/dev/null | awk '/(\.cattle\.io|fleet\.cattle\.io|rancher\.io)/ {print $1}' || true)
 leftover_workloads=$(kubectl get all -A 2>/dev/null | grep -Ei 'rancher|cattle|fleet' || true)
 

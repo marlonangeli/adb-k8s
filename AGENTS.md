@@ -33,3 +33,28 @@
 
 ## Review Checklist
 - Confirme se o `CHANGELOG` foi atualizado com as mudanças relevantes antes de concluir uma entrega.
+
+## Operational Constraints
+- Trabalhe sempre sem `sudo`; qualquer automação deve assumir privilégios limitados e solicitar ao usuário ações manuais que exijam root.
+- O acesso de rede é restrito durante automações locais; para diagnosticar o cluster, peça ao usuário a saída de `kubectl` ou `cilium` quando necessário.
+- A árvore git pode conter alterações pré-existentes (por exemplo, `Makefile`, `README.md`); não reverta nada sem instrução explícita.
+- Evite instalar componentes extras de monitoramento: o ambiente já executa Prometheus/Grafana, e o control-plane opera com memória apertada (~92% em carga recente).
+
+## Cluster Topology & Tooling
+- Cluster bare-metal/VM com `marlon-tcc-vm1` (control-plane) e trabalhadores `marlon-tcc-vm2`/`marlon-tcc-vm3`; sempre adicione workers antes de etapas que exigem workloads distribuídos (ex.: MetalLB).
+- Rede: Cilium (v1.18.x) substitui kube-proxy; Hubble Relay/UI exigem tolerations para agendar em nó control-plane.
+- Storage e ingress: Longhorn provê blocos; MetalLB anuncia IPs (pool atual termina em `.100`); ingress-nginx faz o roteamento L7.
+- Cert-manager roda apenas com emissores internos (sem domínio público); preferir fluxos `--no-cacerts`/self-signed ou desabilitar integrações que dependem de ACME externo.
+- Scripts principais em `bin/` seguem a numeração de estágios (`10` requisitos SO, `20` container runtime, `30` Cilium, … `90` vcluster). Use `bin/run-on-nodes.sh` para orquestrar execuções remotas.
+
+## TCC & vCluster Objectives
+- Tema do TCC: plataforma multi-tenant baseada em `vCluster` onde cada tenant gerencia sua API de dados e banco apenas dentro do vCluster dedicado.
+- O tráfego intra-tenant (API de dados/banco) deve permanecer privado, roteado por balanceador que conhece mapas de tenants; exposição de dados só via serviços internos do vCluster.
+- A API de interpolação de dados reside em cada vCluster, porém permite acesso federado entre tenants com balanceamento descentralizado.
+- Valide qualquer mudança de arquitetura/suporte com o usuário antes de alterar fluxos críticos do tenant e do balanceador.
+
+## Active Focus Areas
+- Scripts `bin/30-cilium.sh`, `bin/55-cert-manager.sh`, `bin/60-rancher.sh`, `bin/remove-rancher.sh` e `bin/90-vcluster.sh` são priorizados; mantenha sua idempotência (`donep`) e trate saídas `kubectl` falhas.
+- Rancher instala agora sem Fleet nem telemetria (variáveis `RANCHER_ENABLE_FLEET=1` e/ou `RANCHER_ENABLE_TELEMETRY=1` reativam); avalie impactos antes de reabilitar para preservar recursos.
+- Para limpeza do Rancher, forçar deleções via `kubectl replace --raw ".../finalize"` pode ser necessário para namespaces `cattle-*`, `fleet-*`, `local`, `p-*`, `user-*`; documente comandos de recuperação usados.
+- Commits só devem ser criados quando o usuário ordenar explicitamente; caso contrário, deixe mudanças no workspace e descreva os passos para validação manual.

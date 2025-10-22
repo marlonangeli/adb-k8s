@@ -10,10 +10,39 @@ require_commands kubectl
 ensure_helm
 : "${RANCHER_ADMIN_PASSWORD:?defina RANCHER_ADMIN_PASSWORD em secrets.env}"
 RANCHER_REPLICAS="${RANCHER_REPLICAS:-1}"
+RANCHER_ENABLE_FLEET="${RANCHER_ENABLE_FLEET:-0}"
+RANCHER_ENABLE_TELEMETRY="${RANCHER_ENABLE_TELEMETRY:-0}"
 RANCHER_STARTUP_FAILURE_THRESHOLD="${RANCHER_STARTUP_FAILURE_THRESHOLD:-30}"
 helm repo add rancher-latest https://releases.rancher.com/server-charts/latest
 helm repo update
 kubectl create ns cattle-system || true
+
+leftover_namespaces=$(kubectl get namespace --no-headers 2>/dev/null | awk '/(cattle|fleet|p-|user-|cluster-fleet)/ && $1!="cattle-system" && $2=="Terminating" {print $1 " " $2}' || true)
+if [[ -n "${leftover_namespaces}" ]]; then
+  log "Detectadas namespaces residuais do Rancher/Fleet:" 
+  printf '%s\n' "${leftover_namespaces}"
+  log "Execute bin/remove-rancher.sh para limpar completamente antes de reinstalar o Rancher."
+  exit 1
+fi
+
+leftover_apiservice=$(kubectl get apiservice 2>/dev/null | awk '/(cattle\\.io|rancher\\.io)/ {print $1}' || true)
+if [[ -n "${leftover_apiservice}" ]]; then
+  log "APIService remanescentes detectadas:"
+  printf '%s\n' "${leftover_apiservice}"
+  log "Execute bin/remove-rancher.sh para removê-las antes de prosseguir."
+  exit 1
+fi
+
+if kubectl get namespace local >/dev/null 2>&1; then
+  local_status=$(kubectl get namespace local -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+  if [[ "${local_status}" == "Terminating" ]]; then
+    log "Namespace 'local' encontra-se em Terminating; execute bin/remove-rancher.sh para restaurar o cluster local antes de reinstalar."
+    exit 1
+  fi
+else
+  kubectl create namespace local >/dev/null 2>&1 || true
+  kubectl annotate namespace local management.cattle.io/no-default-sa-token="true" --overwrite >/dev/null 2>&1 || true
+fi
 
 RANCHER_HOSTNAME=$(resolve_hostname "${RANCHER_HOST_OVERRIDE:-}" "rancher")
 RANCHER_LOCAL_HOSTNAME=$(local_sslip_host "rancher")
@@ -55,6 +84,9 @@ if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
     "${RANCHER_HOSTNAME}" "${RANCHER_LOCAL_HOSTNAME}"
 fi
 
+kubectl -n cattle-system delete job rancher-post-delete rancher-pre-delete --force --grace-period=0 --ignore-not-found >/dev/null 2>&1 || true
+kubectl -n cattle-system delete job -l release=rancher --force --grace-period=0 --ignore-not-found >/dev/null 2>&1 || true
+
 helm_args=(
   upgrade -i rancher "${chart_source}" -n cattle-system
   --set hostname="${RANCHER_HOSTNAME}"
@@ -63,10 +95,19 @@ helm_args=(
   --set replicas="${RANCHER_REPLICAS}"
   --set startupProbe.failureThreshold="${RANCHER_STARTUP_FAILURE_THRESHOLD}"
   --set resources.requests.cpu=250m
-  --set resources.requests.memory=384Mi
+  --set resources.requests.memory=512Mi
   --set resources.limits.cpu=600m
-  --set resources.limits.memory=768Mi
+  --set resources.limits.memory=1Gi
 )
+
+if [[ "${RANCHER_ENABLE_FLEET}" != "1" ]]; then
+  helm_args+=(--set-string features=fleet=false)
+  helm_args+=(--set-string fleet.enabled=false)
+fi
+
+if [[ "${RANCHER_ENABLE_TELEMETRY}" != "1" ]]; then
+  helm_args+=(--set global.cattle.telemetry.enabled=false)
+fi
 
 if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   helm_args+=(--set ingress.tls.source=secret --set privateCA=true)
@@ -175,5 +216,7 @@ if [[ "${TLS_ENABLED:-0}" != "1" ]]; then
   log "e reescreva a anotação: kubectl -n cattle-system annotate ingress rancher kubernetes.io/ingress.class=nginx --overwrite"
 fi
 log "No primeiro acesso ao Rancher defina Settings -> Server URL para http://${RANCHER_HOSTNAME} (ou o host externo desejado)."
+
+wait_rollout cattle-system deployment rancher
 
 ok "${STEP}"
