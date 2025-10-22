@@ -5,6 +5,18 @@ ambiente bare-metal. Todas as automações partem da biblioteca `bin/lib.sh` e
 compartilham as mesmas variáveis exportadas pelos arquivos `env.sh` e
 `secrets.env`.
 
+## Dependências
+
+Todos os scripts pressupõem que os seguintes CLIs estejam instalados localmente:
+
+- `kubectl`
+- `vcluster` (CLI da Loft)
+- `envsubst` (parte do GNU gettext)
+
+Durante a execução via `bin/90-vcluster.sh` essas dependências são validadas.
+Caso alguma esteja ausente, o processo é encerrado antes de iniciar qualquer
+atividade para evitar estados intermediários.
+
 ## Scripts principais
 
 - `create.sh` – Cria ou atualiza um vCluster (perfil `private` ou `shared`),
@@ -53,9 +65,70 @@ Ambos os scripts aceitam `--help` para listar opções detalhadas.
      por namespace `vcluster-<tenant>`.
 5. Para remover um ambiente de teste:
    ```bash
-   scripts/vcluster/remove.sh --cluster tenant-lab
+     scripts/vcluster/remove.sh --cluster tenant-lab
    ```
 
 Os scripts reutilizam o IP do Ingress (obtido via `current_ingress_ip()`) e
 herdam limites personalizados via variáveis de ambiente (ex.: exporte
 `PRIVATE_API_LIMIT_CPU=800m` antes de invocar `create.sh`).
+
+## Integração com a esteira principal
+
+- `bin/90-vcluster.sh` é a etapa final de provisionamento do _cluster_ base e
+  depende da conclusão das fases anteriores:
+  - `bin/40-metallb.sh` + `bin/50-ingress-nginx.sh` para disponibilizar o IP
+    virtual e a classe de ingress utilizada pelos vClusters;
+  - `bin/55-cert-manager.sh`/`bin/70-observability.sh` para publicar
+    certificados e disponibilizar a namespace `monitoring`, permitindo o
+    espelhamento de kubeconfigs;
+  - `bin/80-longhorn.sh` assegura armazenamento compartilhado para bancos de
+    dados dos tenants.
+- A saída de `bin/90-vcluster.sh` alimenta `bin/95-argocd.sh`, que registra
+  os kubeconfigs recém-criados no Argo CD.
+- Os overlays gerados em `adb-api-3/k8s/tenants/<tenant>` são consumidos pelos
+  manifests GitOps aplicados pelo Argo CD após a criação do vCluster.
+
+## Rodando somente os vClusters
+
+- `make vcluster` executa exclusivamente o estágio `bin/90-vcluster.sh`,
+  respeitando os tenants listados em `TENANTS`.
+- Para controlar manualmente a execução:
+  ```bash
+  TENANTS="tenant-lab tenant-prod" VC_FORCE_RECREATE=1 bin/90-vcluster.sh
+  ```
+  A variável `VC_FORCE_RECREATE=1` força a reprovisão mesmo que o tenant já
+  tenha sido concluído anteriormente.
+
+## Retomada após falhas
+
+`bin/90-vcluster.sh` cria marcadores em `${STATE_DIR}/vcluster-progress`. Caso
+algum tenant falhe, basta corrigir a causa e relançar o script: os tenants já
+marcados como concluídos são ignorados. Outras opções:
+
+- `VC_RESUME_FROM=<cluster>` – pula todos os tenants anteriores ao informado,
+  retomando direto do alvo (`VC_RESUME_FROM=shared` executa apenas o vCluster
+  compartilhado).
+- `VC_FORCE_RECREATE=1` – ignora os marcadores e refaz cada tenant do zero.
+- Para criar apenas um tenant isolado (sem percorrer a lista definida em
+  `TENANTS`), execute diretamente:
+  ```bash
+  scripts/vcluster/create.sh --tenant meu-tenant --profile private
+  ```
+
+## Criando novos tenants
+
+1. Garanta que a pasta `adb-api-3/k8s/tenants/<tenant>` exista; o script
+   `create.sh` gera automaticamente `app.env`, `secrets.env` (placeholders) e
+   `ingress-patch.yaml` com os hosts apontando para o IP do vCluster.
+2. Execute:
+   ```bash
+   scripts/vcluster/create.sh \
+     --tenant tenant-novo \
+     --cluster tenant-novo \
+     --profile private
+   ```
+3. Os arquivos gerados podem ser ajustados manualmente (ex.: senhas em
+   `secrets.env`) e versionados no repositório `adb-api-3`.
+4. Para provisionar todos os tenants mapeados na pasta `adb-api-3/k8s/tenants`,
+   defina `TENANTS` com a lista desejada e disparar `bin/90-vcluster.sh` ou
+   `make vcluster`.

@@ -8,6 +8,7 @@ source "${ROOT_DIR}/bin/lib.sh"
 
 # shellcheck disable=SC2034 # exported for helper scripts
 VC_STEP_NAME="${VC_STEP_NAME:-vcluster}"
+: "${VC_PROGRESS_DIR:=${STATE_DIR}/vcluster-progress}"
 
 vc::load_defaults() {
   : "${TENANT_NAMESPACE_PREFIX:=vcluster-}"
@@ -55,6 +56,9 @@ vc::ensure_prereqs() {
   vc::load_defaults
   require_commands kubectl envsubst
   ensure_vcluster_cli
+  require_commands vcluster kubectl envsubst
+
+  mkdir -p "${VC_PROGRESS_DIR}"
 
   : "${VC_TENANT_MANIFEST_ROOT:=${ROOT_DIR}/adb-api-3/k8s/tenants}"
   : "${VC_INTERPOLATION_OVERLAY_DIR:=${ROOT_DIR}/adb-interpolation-api/k8s/overlays/shared}"
@@ -71,6 +75,31 @@ vc::ensure_prereqs() {
     VC_MONITORING_READY=0
     log "namespace monitoring não encontrado; kubeconfigs dos vclusters não serão publicados para observabilidade."
   fi
+}
+
+vc::cluster_checkpoint() {
+  local cluster="$1"
+  printf '%s/%s.ok\n' "${VC_PROGRESS_DIR}" "${cluster}"
+}
+
+vc::cluster_completed() {
+  local cluster="$1"
+  local checkpoint
+  checkpoint="$(vc::cluster_checkpoint "${cluster}")"
+  [[ -f "${checkpoint}" ]]
+}
+
+vc::mark_cluster_completed() {
+  local cluster="$1"
+  mkdir -p "${VC_PROGRESS_DIR}"
+  touch "$(vc::cluster_checkpoint "${cluster}")"
+}
+
+vc::clear_cluster_checkpoint() {
+  local cluster="$1"
+  local checkpoint
+  checkpoint="$(vc::cluster_checkpoint "${cluster}")"
+  [[ -f "${checkpoint}" ]] && rm -f "${checkpoint}"
 }
 
 vc::state_key() {

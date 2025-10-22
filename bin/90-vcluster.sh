@@ -18,16 +18,43 @@ SHARED_VCLUSTER_NAME="${SHARED_VCLUSTER_NAME:-shared}"
 SHARED_VCLUSTER_NAMESPACE="${SHARED_VCLUSTER_NAMESPACE:-vcluster-shared}"
 ENABLE_SHARED_VCLUSTER="${ENABLE_SHARED_VCLUSTER:-1}"
 
+VC_FORCE_RECREATE="${VC_FORCE_RECREATE:-0}"
+VC_RESUME_FROM="${VC_RESUME_FROM:-}"
+vc_resume_reached=0
+if [[ -z "${VC_RESUME_FROM}" ]]; then
+  vc_resume_reached=1
+fi
+
 for tenant in "${TENANT_IDS[@]}"; do
   [[ -n "${tenant}" ]] || continue
   cluster="${tenant}"
   state_key="$(vc::state_key "${cluster}")"
-  kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
+  if (( ! vc_resume_reached )); then
+    if [[ "${cluster}" == "${VC_RESUME_FROM}" ]]; then
+      vc_resume_reached=1
+    else
+      log "pulando ${cluster}; aguardando VC_RESUME_FROM=${VC_RESUME_FROM}"
+      continue
+    fi
+  fi
+  if [[ "${VC_FORCE_RECREATE}" != "1" ]] && vc::cluster_completed "${cluster}"; then
+    log "vcluster ${cluster} já concluído anteriormente; pulando (VC_FORCE_RECREATE=1 para recriar)."
+    continue
+  fi
+  [[ "${VC_FORCE_RECREATE}" == "1" ]] && vc::clear_cluster_checkpoint "${cluster}"
+  kubeconfig_path=""
+  if ! kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
     --tenant "${tenant}" \
     --cluster "${cluster}" \
     --namespace "vcluster-${cluster}" \
     --profile private \
-    --state-key "${state_key}")
+    --state-key "${state_key}"); then
+    save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+    vc::clear_cluster_checkpoint "${cluster}"
+    exit 1
+  fi
+  save_state_var "VCLUSTER_LAST_SUCCEEDED" "${cluster}"
+  vc::mark_cluster_completed "${cluster}"
   log "kubeconfig para ${cluster}: ${kubeconfig_path}"
   api_host_key=$(vc::state_key "${cluster}" "API_HOST")
   interpolation_host_key=$(vc::state_key "${cluster}" "INTERPOLATION_HOST")
@@ -44,18 +71,45 @@ done
 if [[ "${ENABLE_SHARED_VCLUSTER}" == "1" ]]; then
   cluster="${SHARED_VCLUSTER_NAME}"
   state_key="$(vc::state_key "${cluster}")"
-  kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
-    --tenant "shared" \
-    --cluster "${cluster}" \
-    --namespace "${SHARED_VCLUSTER_NAMESPACE}" \
-    --profile shared \
-    --state-key "${state_key}")
-  log "kubeconfig para ${cluster}: ${kubeconfig_path}"
-  shared_host_key=$(vc::state_key "${cluster}" "INTERPOLATION_HOST")
-  shared_host="${!shared_host_key:-}"
-  if [[ -n "${shared_host}" ]]; then
-    log "host da API de interpolação compartilhada: http://${shared_host}"
+  if (( ! vc_resume_reached )); then
+    if [[ "${cluster}" == "${VC_RESUME_FROM}" ]]; then
+      vc_resume_reached=1
+    else
+      log "pulando ${cluster}; aguardando VC_RESUME_FROM=${VC_RESUME_FROM}"
+      cluster=""
+    fi
   fi
+  if [[ -n "${cluster}" ]]; then
+    if [[ "${VC_FORCE_RECREATE}" != "1" ]] && vc::cluster_completed "${cluster}"; then
+      log "vcluster ${cluster} já concluído anteriormente; pulando (VC_FORCE_RECREATE=1 para recriar)."
+    else
+      [[ "${VC_FORCE_RECREATE}" == "1" ]] && vc::clear_cluster_checkpoint "${cluster}"
+      kubeconfig_path=""
+      if ! kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
+        --tenant "shared" \
+        --cluster "${cluster}" \
+        --namespace "${SHARED_VCLUSTER_NAMESPACE}" \
+        --profile shared \
+        --state-key "${state_key}"); then
+        save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+        vc::clear_cluster_checkpoint "${cluster}"
+        exit 1
+      fi
+      save_state_var "VCLUSTER_LAST_SUCCEEDED" "${cluster}"
+      vc::mark_cluster_completed "${cluster}"
+      log "kubeconfig para ${cluster}: ${kubeconfig_path}"
+      shared_host_key=$(vc::state_key "${cluster}" "INTERPOLATION_HOST")
+      shared_host="${!shared_host_key:-}"
+      if [[ -n "${shared_host}" ]]; then
+        log "host da API de interpolação compartilhada: http://${shared_host}"
+      fi
+    fi
+  fi
+fi
+
+if [[ -n "${VC_RESUME_FROM}" && ${vc_resume_reached} -eq 0 ]]; then
+  log "VC_RESUME_FROM=${VC_RESUME_FROM} não encontrado entre os clusters avaliados."
+  exit 1
 fi
 
 if ((${#TENANT_IDS[@]})); then

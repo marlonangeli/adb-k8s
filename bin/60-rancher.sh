@@ -19,7 +19,7 @@ kubectl create ns cattle-system || true
 
 leftover_namespaces=$(kubectl get namespace --no-headers 2>/dev/null | awk '/(cattle|fleet|p-|user-|cluster-fleet)/ && $1!="cattle-system" && $2=="Terminating" {print $1 " " $2}' || true)
 if [[ -n "${leftover_namespaces}" ]]; then
-  log "Detectadas namespaces residuais do Rancher/Fleet:" 
+  log "Detectadas namespaces residuais do Rancher/Fleet:"
   printf '%s\n' "${leftover_namespaces}"
   log "Execute bin/remove-rancher.sh para limpar completamente antes de reinstalar o Rancher."
   exit 1
@@ -101,8 +101,8 @@ helm_args=(
 )
 
 if [[ "${RANCHER_ENABLE_FLEET}" != "1" ]]; then
-  helm_args+=(--set-string features=fleet=false)
-  helm_args+=(--set-string fleet.enabled=false)
+  helm_args+=(--set features=fleet=false,provisioningv2=false)
+  helm_args+=(--set global.cattle.fleet.enabled=false)
 fi
 
 if [[ "${RANCHER_ENABLE_TELEMETRY}" != "1" ]]; then
