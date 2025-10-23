@@ -75,7 +75,9 @@ vc::debug "Parâmetros recebidos: tenant=${tenant} cluster=${cluster} namespace=
 
 vc::ensure_namespace "${namespace}" "${tenant}" "${profile}"
 
-values_file="$(vc::values_for_profile "${profile}" "${namespace}")"
+vcluster_host="$(vc::hostname_for_cluster "${cluster}")"
+vc::debug "Host sugerido para ${cluster}: ${vcluster_host}"
+values_file="$(vc::values_for_profile "${profile}" "${namespace}" "${cluster}" "${vcluster_host}")"
 vc::debug "Values temporário gerado em ${values_file}"
 
 kubeconfig_tmp=$(mktemp)
@@ -89,7 +91,7 @@ else
   rm -f "${kubeconfig_tmp}"
   vc::debug "vcluster ${cluster} inexistente; iniciando criação"
   if ! vcluster create "${cluster}" -n "${namespace}" --connect=false --expose -f "${values_file}"; then
-    vc::debug "Comando 'vcluster create' falhou para ${cluster}. Conteúdo dos values:\n"
+    vc::debug "Comando 'vcluster create' falhou para ${cluster}. Conteúdo dos values:"
     vc::debug "$(sed 's/^/    /' "${values_file}")"
     exit 1
   fi
@@ -132,6 +134,11 @@ else
   save_state_var "${default_state_key}" "${kubeconfig_path}"
 fi
 
+if [[ -n "${vcluster_host}" ]]; then
+  save_state_var "$(vc::state_key "${cluster}" "HOST")" "${vcluster_host}"
+  vc::debug "Host ${vcluster_host} registrado para ${cluster}"
+fi
+
 service_ip=$(vc::discover_service_ip "${namespace}" "${cluster}" || true)
 if [[ -n "${service_ip}" ]]; then
   save_state_var "$(vc::state_key "${cluster}" "SERVICE_IP")" "${service_ip}"
@@ -162,3 +169,5 @@ else
 fi
 
 printf '%s\n' "${kubeconfig_path}"
+
+exit 0;

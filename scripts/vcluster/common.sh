@@ -75,6 +75,12 @@ vc::load_defaults() {
   : "${SHARED_CONTROL_PLANE_LIMIT_CPU:=1470m}"
   : "${SHARED_CONTROL_PLANE_LIMIT_MEMORY:=1408Mi}"
   : "${SHARED_CONTROL_PLANE_K8S_VERSION:=}"
+
+  : "${VCLUSTER_SERVICE_TYPE:=LoadBalancer}"
+  : "${VCLUSTER_METALLB_POOL:=pool-bridge}"
+  : "${VCLUSTER_INGRESS_CLASS:=nginx}"
+  : "${VCLUSTER_ENABLE_INGRESS:=1}"
+  : "${VCLUSTER_HOST_TEMPLATE:=vcluster-[cluster].[slug].sslip.io}"
 }
 
 vc::ensure_prereqs() {
@@ -94,6 +100,8 @@ vc::ensure_prereqs() {
     exit 1
   fi
   vc::debug "Ingress IP detectado: ${VC_INGRESS_IP}"
+  VC_INGRESS_SLUG="$(sslip_slug "${VC_INGRESS_IP}")"
+  vc::debug "Slug do ingress: ${VC_INGRESS_SLUG}"
   vc::debug "TENANT_NAMESPACE_PREFIX=${TENANT_NAMESPACE_PREFIX} TARGET_NAMESPACE=${TENANT_TARGET_NAMESPACE}"
 
   if kubectl get ns monitoring >/dev/null 2>&1; then
@@ -142,6 +150,24 @@ vc::state_key() {
   printf '%s\n' "${key}"
 }
 
+vc::hostname_for_cluster() {
+  local cluster="$1"
+  local slug="${VC_INGRESS_SLUG:-$(sslip_slug "${VC_INGRESS_IP}")}"
+  vc::debug "cluster: ${cluster}"
+  vc::debug "VC_INGRESS_SLUG: ${VC_INGRESS_SLUG} / $(sslip_slug "${VC_INGRESS_IP}")"
+  vc::debug "slug: ${slug}"
+  local template="${VCLUSTER_HOST_TEMPLATE}"
+  vc::debug "template: ${template}"
+  local host="${template//\{cluster\}/${cluster}}"
+  host="${host//\{slug\}/${slug}}"
+  vc::debug "host: ${host}"
+
+  if [[ "${host}" == "${template}" ]]; then
+    host="vcluster-${cluster}.${slug}.sslip.io"
+  fi
+  printf '%s\n' "${host}"
+}
+
 vc::validate_cluster_name() {
   local cluster="$1"
   if [[ ! "${cluster}" =~ ^[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
@@ -169,12 +195,21 @@ vc::ensure_namespace() {
 vc::values_for_profile() {
   local profile="$1"
   local namespace="$2"
+  local cluster="$3"
+  local host="${4:-}"
   local tmp
   tmp=$(mktemp)
   register_tmp "${tmp}"
 
   local cp_request_cpu cp_request_memory cp_limit_cpu cp_limit_memory cp_replicas cp_k8s_version
   local syncer_request_cpu syncer_request_memory syncer_limit_cpu syncer_limit_memory
+  local ingress_enabled="false"
+  if (( VCLUSTER_ENABLE_INGRESS )); then
+    ingress_enabled="true"
+  fi
+  if [[ -n "${host}" ]]; then
+    vc::debug "Configurando host do vcluster ${cluster} para ${host}"
+  fi
 
   if [[ "${profile}" == "private" ]]; then
     cp_replicas="${PRIVATE_CONTROL_PLANE_REPLICAS}"
@@ -229,27 +264,37 @@ EOF
         memory: ${cp_limit_memory}
   service:
     enabled: true
+EOF
+    if [[ "${VCLUSTER_SERVICE_TYPE}" == "LoadBalancer" && -n "${VCLUSTER_METALLB_POOL}" ]]; then
+      cat <<EOF
+    annotations:
+      metallb.universe.tf/address-pool: ${VCLUSTER_METALLB_POOL}
+EOF
+    fi
+    cat <<EOF
     spec:
-      type: ClusterIP
-# syncer:
-#   targetNamespace: ${namespace}
-#   extraArgs:
-#     - --enable-host-dns
-#   resources:
-#     requests:
-#       cpu: ${syncer_request_cpu}
-#       memory: ${syncer_request_memory}
-#     limits:
-#       cpu: ${syncer_limit_cpu}
-#       memory: ${syncer_limit_memory}
+      type: ${VCLUSTER_SERVICE_TYPE}
+EOF
+    if [[ -n "${host}" ]]; then
+      cat <<EOF
+  proxy:
+    extraSANs:
+      - ${host}
+  ingress:
+    enabled: ${ingress_enabled}
+    host: ${host}
+    spec:
+      ingressClassName: ${VCLUSTER_INGRESS_CLASS}
+EOF
+    fi
+    cat <<EOF
+
 sync:
   toHost:
     services:
       enabled: true
     endpoints:
       enabled: true
-    # endpointSlices:
-    #   enabled: true
     pods:
       enabled: true
       rewriteHosts:
@@ -263,27 +308,12 @@ sync:
     persistentVolumeClaims:
       enabled: true
     ingresses:
-      enabled: false
-    networkPolicies:
-      enabled: false
-    priorityClasses:
-      enabled: false
-    podDisruptionBudgets:
-      enabled: false
-    serviceAccounts:
-      enabled: false
-    storageClasses:
-      enabled: false
-    persistentVolumes:
-      enabled: false
-    namespaces:
-      enabled: false
-      mappingsOnly: false
+      enabled: ${ingress_enabled}
   fromHost:
     events:
       enabled: true
-    configMaps:
-      enabled: false
+    ingressClasses:
+      enabled: ${ingress_enabled}
 EOF
   } >"${tmp}"
   printf '%s\n' "${tmp}"

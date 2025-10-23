@@ -53,6 +53,7 @@ for tenant in "${TENANT_IDS[@]}"; do
     --state-key "${state_key}"); then
     save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
     vc::clear_cluster_checkpoint "${cluster}"
+    log "Erro no script vcluster/create.sh"
     exit 1
   fi
   save_state_var "VCLUSTER_LAST_SUCCEEDED" "${cluster}"

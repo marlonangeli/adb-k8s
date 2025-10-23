@@ -1,5 +1,8 @@
 # Changelog
 
+## 2025-10-22
+- vCluster values template ajustado para o schema oficial do `vcluster.yaml`: remove campos inválidos, emite `exportKubeConfig.kubeConfigServer`, gera hostnames `sslip.io` consistentes e expõe o control plane via MetalLB/Ingress sem depender de port-forward (`scripts/vcluster/common.sh`, `scripts/vcluster/create.sh`, `scripts/vcluster/remove.sh`, `env.sh`).
+
 ## 2025-10-19
 - vCluster automatizado foi modularizado: `bin/90-vcluster.sh` delega para o toolkit `scripts/vcluster/` (criação/remoção individual, publicação de kubeconfig, políticas Cilium reaproveitáveis) e agora gera automaticamente os hosts `api-<tenant>.<ip>.sslip.io` / `interpolation.<ip>.sslip.io` nos overlays Kustomize.
 - Novo estágio `bin/95-argocd.sh` instala/atualiza o Argo CD, registra todos os vClusters, verifica clusters já configurados e cria Applications GitOps parametrizadas; Makefile e `env.sh` ajustados para o fluxo.

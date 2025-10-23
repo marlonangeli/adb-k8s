@@ -94,6 +94,10 @@ fi
 
 remove_state_var "${state_key}"
 vc::debug "Variável de estado ${state_key} removida de ${DYNAMIC_ENV}"
+remove_state_var "$(vc::state_key "${cluster}" "SERVICE_IP")"
+remove_state_var "$(vc::state_key "${cluster}" "HOST")"
+remove_state_var "$(vc::state_key "${cluster}" "API_HOST")"
+remove_state_var "$(vc::state_key "${cluster}" "INTERPOLATION_HOST")"
 
 if (( remove_monitoring_secret )); then
   vc::debug "Removendo secret de monitoring do cluster ${cluster}"
