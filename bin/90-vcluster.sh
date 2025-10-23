@@ -13,6 +13,7 @@ vc::ensure_prereqs
 INGRESS_IP="${VC_INGRESS_IP}"
 
 IFS=' ' read -r -a TENANT_IDS <<<"${TENANTS:-tenant-a}"
+vc::debug "Tenants alvo: ${TENANT_IDS[*]:-<nenhum>} ENABLE_SHARED_VCLUSTER=${ENABLE_SHARED_VCLUSTER}"
 
 SHARED_VCLUSTER_NAME="${SHARED_VCLUSTER_NAME:-shared}"
 SHARED_VCLUSTER_NAMESPACE="${SHARED_VCLUSTER_NAMESPACE:-vcluster-shared}"
@@ -41,6 +42,7 @@ for tenant in "${TENANT_IDS[@]}"; do
     log "vcluster ${cluster} já concluído anteriormente; pulando (VC_FORCE_RECREATE=1 para recriar)."
     continue
   fi
+  vc::debug "Processando tenant ${tenant} (cluster=${cluster}) namespace=vcluster-${cluster}"
   [[ "${VC_FORCE_RECREATE}" == "1" ]] && vc::clear_cluster_checkpoint "${cluster}"
   kubeconfig_path=""
   if ! kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
@@ -80,6 +82,7 @@ if [[ "${ENABLE_SHARED_VCLUSTER}" == "1" ]]; then
     fi
   fi
   if [[ -n "${cluster}" ]]; then
+    vc::debug "Processando vcluster compartilhado ${cluster} namespace=${SHARED_VCLUSTER_NAMESPACE}"
     if [[ "${VC_FORCE_RECREATE}" != "1" ]] && vc::cluster_completed "${cluster}"; then
       log "vcluster ${cluster} já concluído anteriormente; pulando (VC_FORCE_RECREATE=1 para recriar)."
     else

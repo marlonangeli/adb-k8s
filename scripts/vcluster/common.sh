@@ -9,6 +9,19 @@ source "${ROOT_DIR}/bin/lib.sh"
 # shellcheck disable=SC2034 # exported for helper scripts
 VC_STEP_NAME="${VC_STEP_NAME:-vcluster}"
 : "${VC_PROGRESS_DIR:=${STATE_DIR}/vcluster-progress}"
+: "${VC_DEBUG:=1}"
+
+VC_COLOR_YELLOW=$'\033[33m'
+VC_COLOR_RESET=$'\033[0m'
+
+vc::debug() {
+  (( VC_DEBUG )) || return 0
+  local timestamp msg
+  timestamp="$(date +'%F %T')"
+  msg="[vc-debug] $*"
+  printf '%s[%s] %s%s\n' "${VC_COLOR_YELLOW}" "${timestamp}" "${msg}" "${VC_COLOR_RESET}" >&2
+  printf '[%s] %s\n' "${timestamp}" "${msg}" >>"${LOG_FILE}"
+}
 
 vc::load_defaults() {
   : "${TENANT_NAMESPACE_PREFIX:=vcluster-}"
@@ -33,6 +46,12 @@ vc::load_defaults() {
   : "${PRIVATE_SYNCER_REQUEST_MEMORY:=256Mi}"
   : "${PRIVATE_SYNCER_LIMIT_CPU:=500m}"
   : "${PRIVATE_SYNCER_LIMIT_MEMORY:=512Mi}"
+  : "${PRIVATE_CONTROL_PLANE_REPLICAS:=1}"
+  : "${PRIVATE_CONTROL_PLANE_REQUEST_CPU:=450m}"
+  : "${PRIVATE_CONTROL_PLANE_REQUEST_MEMORY:=576Mi}"
+  : "${PRIVATE_CONTROL_PLANE_LIMIT_CPU:=1300m}"
+  : "${PRIVATE_CONTROL_PLANE_LIMIT_MEMORY:=1152Mi}"
+  : "${PRIVATE_CONTROL_PLANE_K8S_VERSION:=}"
 
   : "${SHARED_API_REQUEST_CPU:=250m}"
   : "${SHARED_API_REQUEST_MEMORY:=320Mi}"
@@ -50,13 +69,19 @@ vc::load_defaults() {
   : "${SHARED_SYNCER_REQUEST_MEMORY:=256Mi}"
   : "${SHARED_SYNCER_LIMIT_CPU:=520m}"
   : "${SHARED_SYNCER_LIMIT_MEMORY:=512Mi}"
+  : "${SHARED_CONTROL_PLANE_REPLICAS:=1}"
+  : "${SHARED_CONTROL_PLANE_REQUEST_CPU:=550m}"
+  : "${SHARED_CONTROL_PLANE_REQUEST_MEMORY:=736Mi}"
+  : "${SHARED_CONTROL_PLANE_LIMIT_CPU:=1470m}"
+  : "${SHARED_CONTROL_PLANE_LIMIT_MEMORY:=1408Mi}"
+  : "${SHARED_CONTROL_PLANE_K8S_VERSION:=}"
 }
 
 vc::ensure_prereqs() {
   vc::load_defaults
   require_commands kubectl envsubst
   ensure_vcluster_cli
-  require_commands vcluster kubectl envsubst
+  require_commands vcluster
 
   mkdir -p "${VC_PROGRESS_DIR}"
 
@@ -68,9 +93,12 @@ vc::ensure_prereqs() {
     log "Ingress IP não conhecido; execute o estágio do ingress antes do vcluster."
     exit 1
   fi
+  vc::debug "Ingress IP detectado: ${VC_INGRESS_IP}"
+  vc::debug "TENANT_NAMESPACE_PREFIX=${TENANT_NAMESPACE_PREFIX} TARGET_NAMESPACE=${TENANT_TARGET_NAMESPACE}"
 
   if kubectl get ns monitoring >/dev/null 2>&1; then
     VC_MONITORING_READY=1
+    vc::debug "Namespace monitoring encontrado; secrets serão publicados."
   else
     VC_MONITORING_READY=0
     log "namespace monitoring não encontrado; kubeconfigs dos vclusters não serão publicados para observabilidade."
@@ -93,13 +121,17 @@ vc::mark_cluster_completed() {
   local cluster="$1"
   mkdir -p "${VC_PROGRESS_DIR}"
   touch "$(vc::cluster_checkpoint "${cluster}")"
+  vc::debug "Checkpoint registrado para ${cluster}"
 }
 
 vc::clear_cluster_checkpoint() {
   local cluster="$1"
   local checkpoint
   checkpoint="$(vc::cluster_checkpoint "${cluster}")"
-  [[ -f "${checkpoint}" ]] && rm -f "${checkpoint}"
+  if [[ -f "${checkpoint}" ]]; then
+    rm -f "${checkpoint}"
+    vc::debug "Checkpoint removido para ${cluster}"
+  fi
 }
 
 vc::state_key() {
@@ -123,7 +155,10 @@ vc::ensure_namespace() {
   local tenant="$2"
   local role="$3"
   if ! kubectl get namespace "${namespace}" >/dev/null 2>&1; then
+    vc::debug "Criando namespace ${namespace} para tenant=${tenant} role=${role}"
     kubectl create namespace "${namespace}"
+  else
+    vc::debug "Namespace ${namespace} já existe; aplicando rótulos para tenant=${tenant} role=${role}"
   fi
   kubectl label namespace "${namespace}" \
     "adb.tenancy/tenant=${tenant}" \
@@ -138,86 +173,119 @@ vc::values_for_profile() {
   tmp=$(mktemp)
   register_tmp "${tmp}"
 
-  local api_request_cpu api_request_memory api_limit_cpu api_limit_memory
-  local controller_request_cpu controller_request_memory controller_limit_cpu controller_limit_memory
-  local scheduler_request_cpu scheduler_request_memory scheduler_limit_cpu scheduler_limit_memory
+  local cp_request_cpu cp_request_memory cp_limit_cpu cp_limit_memory cp_replicas cp_k8s_version
   local syncer_request_cpu syncer_request_memory syncer_limit_cpu syncer_limit_memory
 
   if [[ "${profile}" == "private" ]]; then
-    api_request_cpu="${PRIVATE_API_REQUEST_CPU}"
-    api_request_memory="${PRIVATE_API_REQUEST_MEMORY}"
-    api_limit_cpu="${PRIVATE_API_LIMIT_CPU}"
-    api_limit_memory="${PRIVATE_API_LIMIT_MEMORY}"
-    controller_request_cpu="${PRIVATE_CONTROLLER_MANAGER_REQUEST_CPU}"
-    controller_request_memory="${PRIVATE_CONTROLLER_MANAGER_REQUEST_MEMORY}"
-    controller_limit_cpu="${PRIVATE_CONTROLLER_MANAGER_LIMIT_CPU}"
-    controller_limit_memory="${PRIVATE_CONTROLLER_MANAGER_LIMIT_MEMORY}"
-    scheduler_request_cpu="${PRIVATE_SCHEDULER_REQUEST_CPU}"
-    scheduler_request_memory="${PRIVATE_SCHEDULER_REQUEST_MEMORY}"
-    scheduler_limit_cpu="${PRIVATE_SCHEDULER_LIMIT_CPU}"
-    scheduler_limit_memory="${PRIVATE_SCHEDULER_LIMIT_MEMORY}"
+    cp_replicas="${PRIVATE_CONTROL_PLANE_REPLICAS}"
+    cp_request_cpu="${PRIVATE_CONTROL_PLANE_REQUEST_CPU}"
+    cp_request_memory="${PRIVATE_CONTROL_PLANE_REQUEST_MEMORY}"
+    cp_limit_cpu="${PRIVATE_CONTROL_PLANE_LIMIT_CPU}"
+    cp_limit_memory="${PRIVATE_CONTROL_PLANE_LIMIT_MEMORY}"
+    cp_k8s_version="${PRIVATE_CONTROL_PLANE_K8S_VERSION}"
     syncer_request_cpu="${PRIVATE_SYNCER_REQUEST_CPU}"
     syncer_request_memory="${PRIVATE_SYNCER_REQUEST_MEMORY}"
     syncer_limit_cpu="${PRIVATE_SYNCER_LIMIT_CPU}"
     syncer_limit_memory="${PRIVATE_SYNCER_LIMIT_MEMORY}"
   else
-    api_request_cpu="${SHARED_API_REQUEST_CPU}"
-    api_request_memory="${SHARED_API_REQUEST_MEMORY}"
-    api_limit_cpu="${SHARED_API_LIMIT_CPU}"
-    api_limit_memory="${SHARED_API_LIMIT_MEMORY}"
-    controller_request_cpu="${SHARED_CONTROLLER_MANAGER_REQUEST_CPU}"
-    controller_request_memory="${SHARED_CONTROLLER_MANAGER_REQUEST_MEMORY}"
-    controller_limit_cpu="${SHARED_CONTROLLER_MANAGER_LIMIT_CPU}"
-    controller_limit_memory="${SHARED_CONTROLLER_MANAGER_LIMIT_MEMORY}"
-    scheduler_request_cpu="${SHARED_SCHEDULER_REQUEST_CPU}"
-    scheduler_request_memory="${SHARED_SCHEDULER_REQUEST_MEMORY}"
-    scheduler_limit_cpu="${SHARED_SCHEDULER_LIMIT_CPU}"
-    scheduler_limit_memory="${SHARED_SCHEDULER_LIMIT_MEMORY}"
+    cp_replicas="${SHARED_CONTROL_PLANE_REPLICAS}"
+    cp_request_cpu="${SHARED_CONTROL_PLANE_REQUEST_CPU}"
+    cp_request_memory="${SHARED_CONTROL_PLANE_REQUEST_MEMORY}"
+    cp_limit_cpu="${SHARED_CONTROL_PLANE_LIMIT_CPU}"
+    cp_limit_memory="${SHARED_CONTROL_PLANE_LIMIT_MEMORY}"
+    cp_k8s_version="${SHARED_CONTROL_PLANE_K8S_VERSION}"
     syncer_request_cpu="${SHARED_SYNCER_REQUEST_CPU}"
     syncer_request_memory="${SHARED_SYNCER_REQUEST_MEMORY}"
     syncer_limit_cpu="${SHARED_SYNCER_LIMIT_CPU}"
     syncer_limit_memory="${SHARED_SYNCER_LIMIT_MEMORY}"
   fi
+  vc::debug "Gerando values para profile=${profile} namespace=${namespace} (cp requests=${cp_request_cpu}/${cp_request_memory})"
 
-  cat >"${tmp}" <<EOF
+  {
+    cat <<EOF
 controlPlane:
-  distro: k8s
-syncer:
-  targetNamespace: ${namespace}
-  extraArgs:
-    - --enable-host-dns
-  resources:
-    requests:
-      cpu: ${syncer_request_cpu}
-      memory: ${syncer_request_memory}
-    limits:
-      cpu: ${syncer_limit_cpu}
-      memory: ${syncer_limit_memory}
-api:
-  resources:
-    requests:
-      cpu: ${api_request_cpu}
-      memory: ${api_request_memory}
-    limits:
-      cpu: ${api_limit_cpu}
-      memory: ${api_limit_memory}
-controllerManager:
-  resources:
-    requests:
-      cpu: ${controller_request_cpu}
-      memory: ${controller_request_memory}
-    limits:
-      cpu: ${controller_limit_cpu}
-      memory: ${controller_limit_memory}
-scheduler:
-  resources:
-    requests:
-      cpu: ${scheduler_request_cpu}
-      memory: ${scheduler_request_memory}
-    limits:
-      cpu: ${scheduler_limit_cpu}
-      memory: ${scheduler_limit_memory}
+  distro:
+    k8s:
+      enabled: true
 EOF
+    if [[ -n "${cp_k8s_version}" ]]; then
+      cat <<EOF
+      version: ${cp_k8s_version}
+EOF
+    fi
+    cat <<EOF
+  statefulSet:
+    highAvailability:
+      replicas: ${cp_replicas}
+    persistence:
+      volumeClaim:
+        enabled: false
+    resources:
+      requests:
+        cpu: ${cp_request_cpu}
+        memory: ${cp_request_memory}
+      limits:
+        cpu: ${cp_limit_cpu}
+        memory: ${cp_limit_memory}
+  service:
+    enabled: true
+    spec:
+      type: ClusterIP
+# syncer:
+#   targetNamespace: ${namespace}
+#   extraArgs:
+#     - --enable-host-dns
+#   resources:
+#     requests:
+#       cpu: ${syncer_request_cpu}
+#       memory: ${syncer_request_memory}
+#     limits:
+#       cpu: ${syncer_limit_cpu}
+#       memory: ${syncer_limit_memory}
+sync:
+  toHost:
+    services:
+      enabled: true
+    endpoints:
+      enabled: true
+    # endpointSlices:
+    #   enabled: true
+    pods:
+      enabled: true
+      rewriteHosts:
+        enabled: true
+    configMaps:
+      enabled: true
+      all: false
+    secrets:
+      enabled: true
+      all: false
+    persistentVolumeClaims:
+      enabled: true
+    ingresses:
+      enabled: false
+    networkPolicies:
+      enabled: false
+    priorityClasses:
+      enabled: false
+    podDisruptionBudgets:
+      enabled: false
+    serviceAccounts:
+      enabled: false
+    storageClasses:
+      enabled: false
+    persistentVolumes:
+      enabled: false
+    namespaces:
+      enabled: false
+      mappingsOnly: false
+  fromHost:
+    events:
+      enabled: true
+    configMaps:
+      enabled: false
+EOF
+  } >"${tmp}"
   printf '%s\n' "${tmp}"
 }
 
@@ -235,6 +303,7 @@ vc::vcluster_service_name() {
       svc="vcluster-${cluster}"
     fi
   fi
+  vc::debug "Service associado a ${cluster}/${namespace}: ${svc:-nenhum}"
   printf '%s\n' "${svc}"
 }
 
@@ -245,14 +314,21 @@ vc::discover_service_ip() {
 
   svc=$(vc::vcluster_service_name "${namespace}" "${cluster}")
   if [[ -z "${svc}" ]]; then
+    vc::debug "Nenhum Service encontrado para ${cluster} em ${namespace}"
     return 1
   fi
 
+  vc::debug "Aguardando IP para Service ${namespace}/${svc}"
   ip=$(wait_for_lb_ip "${namespace}" "${svc}" 180 || true)
   if [[ -z "${ip}" ]]; then
     ip=$(kubectl -n "${namespace}" get svc "${svc}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
   fi
 
+  if [[ -n "${ip}" ]]; then
+    vc::debug "IP detectado para ${cluster}: ${ip}"
+  else
+    vc::debug "Não foi possível determinar IP para ${cluster}/${namespace}"
+  fi
   [[ -n "${ip}" ]] || return 1
   printf '%s\n' "${ip}"
 }
@@ -275,6 +351,7 @@ vc::ensure_tenant_overlay() {
 
   overlay_dir="${VC_TENANT_MANIFEST_ROOT}/${tenant}"
   mkdir -p "${overlay_dir}"
+  vc::debug "Atualizando overlay do tenant ${tenant} em ${overlay_dir} (Service IP=${service_ip})"
 
   local kustom_file="${overlay_dir}/kustomization.yaml"
   if [[ ! -f "${kustom_file}" ]]; then
@@ -343,6 +420,7 @@ spec:
                   number: 80
 EOF
 
+  vc::debug "Hosts do tenant ${tenant}: API=${api_host} Interpolation=${interpolation_host}"
   printf '%s %s\n' "${api_host}" "${interpolation_host}"
 }
 
@@ -353,6 +431,7 @@ vc::update_shared_overlay() {
   local slug interpolation_host
   slug=$(sslip_slug "${service_ip}")
   interpolation_host="interpolation.${slug}.sslip.io"
+  vc::debug "Atualizando overlay compartilhado com Service IP=${service_ip} host=${interpolation_host}"
 
   cat >"${VC_INTERPOLATION_OVERLAY_DIR}/settings.env" <<EOF
 # Arquivo gerado automaticamente por scripts/vcluster/create.sh
@@ -399,11 +478,13 @@ vc::refresh_tenant_overlays() {
       printf 'INTERPOLATION_BASE_URL=http://%s\n' "${shared_host}" >>"${app_file}"
     fi
     save_state_var "$(vc::state_key "${tenant}" "INTERPOLATION_HOST")" "${shared_host}"
+    vc::debug "Atualizado overlay ${tenant} para usar interpolação ${shared_host}"
   done
 }
 
 vc::apply_private_network_policies() {
   local namespace="$1"
+  vc::debug "Aplicando políticas de rede privadas em ${namespace}"
   kubectl apply -n "${namespace}" -f - <<EOF
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
@@ -466,6 +547,7 @@ EOF
 
 vc::apply_shared_network_policies() {
   local namespace="$1"
+  vc::debug "Aplicando políticas de rede compartilhadas em ${namespace}"
   kubectl apply -n "${namespace}" -f - <<EOF
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
@@ -519,8 +601,10 @@ vc::apply_network_policies() {
   local profile="$2"
   if [[ "${profile}" == "private" ]]; then
     vc::apply_private_network_policies "${namespace}"
+    vc::debug "Política private aplicada em ${namespace}"
   else
     vc::apply_shared_network_policies "${namespace}"
+    vc::debug "Política shared aplicada em ${namespace}"
   fi
 }
 
@@ -530,6 +614,7 @@ vc::publish_monitoring_secret() {
   local role="$3"
   local kubeconfig_path="$4"
   (( VC_MONITORING_READY )) || return 0
+  vc::debug "Publicando kubeconfig ${kubeconfig_path} no monitoring para ${cluster_name} (tenant=${tenant}, role=${role})"
 
   kubectl -n monitoring create secret generic "vcluster-${cluster_name}-kubeconfig" \
     --from-file=kubeconfig="${kubeconfig_path}" \
@@ -545,6 +630,9 @@ vc::cleanup_monitoring_secret() {
   local cluster_name="$1"
   (( VC_MONITORING_READY )) || return 0
   if kubectl -n monitoring get secret "vcluster-${cluster_name}-kubeconfig" >/dev/null 2>&1; then
+    vc::debug "Removendo secret vcluster-${cluster_name}-kubeconfig do monitoring"
     kubectl -n monitoring delete secret "vcluster-${cluster_name}-kubeconfig"
+  else
+    vc::debug "Nenhum secret de monitoring encontrado para ${cluster_name}"
   fi
 }

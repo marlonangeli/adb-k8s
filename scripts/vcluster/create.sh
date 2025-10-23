@@ -71,36 +71,55 @@ vc::ensure_prereqs
 vc::validate_cluster_name "${cluster}"
 [[ -n "${namespace}" ]] || namespace="${TENANT_NAMESPACE_PREFIX}${cluster}"
 
+vc::debug "Parâmetros recebidos: tenant=${tenant} cluster=${cluster} namespace=${namespace} profile=${profile}"
+
 vc::ensure_namespace "${namespace}" "${tenant}" "${profile}"
 
 values_file="$(vc::values_for_profile "${profile}" "${namespace}")"
+vc::debug "Values temporário gerado em ${values_file}"
 
 kubeconfig_tmp=$(mktemp)
 register_tmp "${kubeconfig_tmp}"
 existed=0
-if vcluster connect "${cluster}" -n "${namespace}" --update-current=false --print >"${kubeconfig_tmp}" 2>/dev/null; then
+vc::debug "Validando existência do vcluster ${cluster} em ${namespace}"
+if vcluster connect "${cluster}" -n "${namespace}" --print >"${kubeconfig_tmp}" 2>/dev/null; then
   existed=1
-  log "vcluster ${cluster} (${namespace}) já existe; reutilizando configuração atual."
+  vc::debug "vcluster ${cluster} encontrado; reaproveitando kubeconfig atual"
 else
   rm -f "${kubeconfig_tmp}"
-  log "criando vcluster ${cluster} (${namespace})"
-  vcluster create "${cluster}" -n "${namespace}" --connect=false --expose -f "${values_file}"
+  vc::debug "vcluster ${cluster} inexistente; iniciando criação"
+  if ! vcluster create "${cluster}" -n "${namespace}" --connect=false --expose -f "${values_file}"; then
+    vc::debug "Comando 'vcluster create' falhou para ${cluster}. Conteúdo dos values:\n"
+    vc::debug "$(sed 's/^/    /' "${values_file}")"
+    exit 1
+  fi
   kubeconfig_tmp=$(mktemp)
   register_tmp "${kubeconfig_tmp}"
-  vcluster connect "${cluster}" -n "${namespace}" --update-current=false --print >"${kubeconfig_tmp}"
+  if ! vcluster connect "${cluster}" -n "${namespace}" --print >"${kubeconfig_tmp}"; then
+    vc::debug "Falha ao conectar ao vcluster ${cluster} após criação."
+    exit 1
+  fi
 fi
 
-[[ -s "${kubeconfig_tmp}" ]] || { log "não foi possível obter o kubeconfig do vcluster ${cluster}"; exit 1; }
+if [[ ! -s "${kubeconfig_tmp}" ]]; then
+  vc::debug "Arquivo de kubeconfig vazio para ${cluster}"
+  log "não foi possível obter o kubeconfig do vcluster ${cluster}"
+  exit 1
+fi
 
 kubeconfig_path="${STATE_DIR}/kubeconfig-${cluster}.yaml"
 mkdir -p "$(dirname "${kubeconfig_path}")"
 mv "${kubeconfig_tmp}" "${kubeconfig_path}"
 chmod 0600 "${kubeconfig_path}"
+vc::debug "Kubeconfig de ${cluster} salvo em ${kubeconfig_path}"
 
 vc::apply_network_policies "${namespace}" "${profile}"
+vc::debug "Políticas de rede aplicadas para namespace ${namespace}"
 
 if (( publish_monitoring )); then
   vc::publish_monitoring_secret "${cluster}" "${tenant}" "${profile}" "${kubeconfig_path}"
+else
+  vc::debug "Publicação no monitoring desabilitada para ${cluster}"
 fi
 
 default_state_key="$(vc::state_key "${cluster}")"
@@ -116,17 +135,20 @@ fi
 service_ip=$(vc::discover_service_ip "${namespace}" "${cluster}" || true)
 if [[ -n "${service_ip}" ]]; then
   save_state_var "$(vc::state_key "${cluster}" "SERVICE_IP")" "${service_ip}"
+  vc::debug "IP do Service detectado (${service_ip}) registrado para ${cluster}"
   if [[ "${profile}" == "private" ]]; then
     shared_key=$(vc::state_key "${SHARED_VCLUSTER_NAME}" "INTERPOLATION_HOST")
     shared_host="${!shared_key:-}"
     read -r api_host interpolation_host < <(vc::ensure_tenant_overlay "${cluster}" "${service_ip}" "${shared_host}")
     save_state_var "$(vc::state_key "${cluster}" "API_HOST")" "${api_host}"
     save_state_var "$(vc::state_key "${cluster}" "INTERPOLATION_HOST")" "${interpolation_host}"
+    vc::debug "Overlays do tenant ${cluster} atualizados (API=${api_host}, interpolation=${interpolation_host})"
   else
     shared_host=$(vc::update_shared_overlay "${service_ip}")
     if [[ -n "${shared_host}" ]]; then
       save_state_var "$(vc::state_key "${cluster}" "INTERPOLATION_HOST")" "${shared_host}"
       vc::refresh_tenant_overlays "${shared_host}"
+      vc::debug "Overlay compartilhado atualizado com host ${shared_host}"
     fi
   fi
 else
