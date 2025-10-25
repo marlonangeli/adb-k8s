@@ -16,7 +16,47 @@ mkdir -p "${STATE_DIR}"
 touch "${LOG_FILE}"
 
 DYNAMIC_ENV="${STATE_DIR}/dynamic.env"
-[[ -f "${DYNAMIC_ENV}" ]] && source "${DYNAMIC_ENV}"
+
+sanitize_dynamic_env() {
+  local tmp changed line key raw_value escaped
+  tmp=$(mktemp)
+  changed=0
+  while IFS= read -r line || [[ -n "${line}" ]]; do
+    if [[ "${line}" =~ ^([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]]; then
+      key="${BASH_REMATCH[1]}"
+      raw_value="${BASH_REMATCH[2]}"
+      if [[ "${raw_value}" =~ [[:space:]] ]]; then
+        local needs_fix=1
+        if [[ "${raw_value}" == \"*\" ]]; then
+          needs_fix=0
+        elif [[ "${raw_value}" == \'*\' ]]; then
+          needs_fix=0
+        elif [[ "${raw_value}" == \$\'*\' ]]; then
+          needs_fix=0
+        elif [[ "${raw_value}" == *\\\ * ]]; then
+          needs_fix=0
+        fi
+        if (( needs_fix )); then
+          printf -v escaped '%q' "${raw_value}"
+          printf '%s=%s\n' "${key}" "${escaped}" >> "${tmp}"
+          changed=1
+          continue
+        fi
+      fi
+    fi
+    printf '%s\n' "${line}" >> "${tmp}"
+  done < "${DYNAMIC_ENV}"
+  if (( changed )); then
+    mv "${tmp}" "${DYNAMIC_ENV}"
+  else
+    rm -f "${tmp}"
+  fi
+}
+
+if [[ -f "${DYNAMIC_ENV}" ]]; then
+  sanitize_dynamic_env
+  source "${DYNAMIC_ENV}"
+fi
 
 log() { echo "[$(date +'%F %T')] $*" | tee -a "${LOG_FILE}"; }
 ok() { touch "${STATE_DIR}/$1.ok"; log "ok: $1"; }
@@ -68,11 +108,16 @@ render_template() {
 save_state_var() {
   local key="$1"
   local value="$2"
+  local quoted_value
+  printf -v quoted_value '%q' "${value}"
+
   mkdir -p "${STATE_DIR}"
   local tmp
   tmp=$(mktemp)
-  [[ -f "${DYNAMIC_ENV}" ]] && grep -v "^${key}=" "${DYNAMIC_ENV}" >"${tmp}"
-  echo "${key}=${value}" >>"${tmp}"
+  if [[ -f "${DYNAMIC_ENV}" ]]; then
+    grep -v "^${key}=" "${DYNAMIC_ENV}" >"${tmp}" || true
+  fi
+  printf '%s=%s\n' "${key}" "${quoted_value}" >>"${tmp}"
   mv "${tmp}" "${DYNAMIC_ENV}"
   source "${DYNAMIC_ENV}"
 }
