@@ -23,6 +23,18 @@ vc::debug() {
   printf '[%s] %s\n' "${timestamp}" "${msg}" >>"${LOG_FILE}"
 }
 
+vc::phase() {
+  local cluster="$1" step="$2"
+  mkdir -p "${VC_PROGRESS_DIR}"
+  printf '%s\n' "${step}" >"${VC_PROGRESS_DIR}/${cluster}.phase"
+}
+
+vc::phase_fail() {
+  local cluster="$1" msg="$2"
+  mkdir -p "${VC_PROGRESS_DIR}"
+  printf '%s\n' "${msg}" >"${VC_PROGRESS_DIR}/${cluster}.error"
+}
+
 vc::load_defaults() {
   : "${TENANT_NAMESPACE_PREFIX:=vcluster-}"
   : "${TENANT_TARGET_NAMESPACE:=app}"
@@ -79,8 +91,14 @@ vc::load_defaults() {
   : "${VCLUSTER_SERVICE_TYPE:=LoadBalancer}"
   : "${VCLUSTER_METALLB_POOL:=pool-bridge}"
   : "${VCLUSTER_INGRESS_CLASS:=nginx}"
-  : "${VCLUSTER_ENABLE_INGRESS:=1}"
+  : "${VCLUSTER_ENABLE_INGRESS:=0}"
   : "${VCLUSTER_HOST_TEMPLATE:=vcluster-[cluster].[slug].sslip.io}"
+  : "${VC_DISABLE_NETWORK_POLICIES:=1}"
+}
+
+vc::make_host() {
+  local prefix="$1" slug="$2"
+  printf '%s.%s.sslip.io\n' "${prefix}" "${slug}"
 }
 
 vc::ensure_prereqs() {
@@ -103,6 +121,13 @@ vc::ensure_prereqs() {
   VC_INGRESS_SLUG="$(sslip_slug "${VC_INGRESS_IP}")"
   vc::debug "Slug do ingress: ${VC_INGRESS_SLUG}"
   vc::debug "TENANT_NAMESPACE_PREFIX=${TENANT_NAMESPACE_PREFIX} TARGET_NAMESPACE=${TENANT_TARGET_NAMESPACE}"
+
+  VC_K8S_API_IP="$(kubectl -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
+  if [[ -n "${VC_K8S_API_IP}" ]]; then
+    vc::debug "ClusterIP do serviço kubernetes: ${VC_K8S_API_IP}"
+  else
+    log "Não foi possível descobrir o ClusterIP do serviço kubernetes; verifique permissões."
+  fi
 
   if kubectl get ns monitoring >/dev/null 2>&1; then
     VC_MONITORING_READY=1
@@ -156,15 +181,9 @@ vc::hostname_for_cluster() {
   vc::debug "cluster: ${cluster}"
   vc::debug "VC_INGRESS_SLUG: ${VC_INGRESS_SLUG} / $(sslip_slug "${VC_INGRESS_IP}")"
   vc::debug "slug: ${slug}"
-  local template="${VCLUSTER_HOST_TEMPLATE}"
-  vc::debug "template: ${template}"
-  local host="${template//\{cluster\}/${cluster}}"
-  host="${host//\{slug\}/${slug}}"
+  local host
+  host="$(vc::make_host "vcluster-${cluster}" "${slug}")"
   vc::debug "host: ${host}"
-
-  if [[ "${host}" == "${template}" ]]; then
-    host="vcluster-${cluster}.${slug}.sslip.io"
-  fi
   printf '%s\n' "${host}"
 }
 
@@ -182,33 +201,26 @@ vc::ensure_namespace() {
   local role="$3"
   if ! kubectl get namespace "${namespace}" >/dev/null 2>&1; then
     vc::debug "Criando namespace ${namespace} para tenant=${tenant} role=${role}"
-    kubectl create namespace "${namespace}"
+    kubectl create namespace "${namespace}" >/dev/null
   else
     vc::debug "Namespace ${namespace} já existe; aplicando rótulos para tenant=${tenant} role=${role}"
   fi
   kubectl label namespace "${namespace}" \
     "adb.tenancy/tenant=${tenant}" \
     "adb.tenancy/role=${role}" \
-    --overwrite
+    --overwrite >/dev/null
 }
 
 vc::values_for_profile() {
   local profile="$1"
   local namespace="$2"
-  local cluster="$3"
-  local host="${4:-}"
-  local tmp
-  tmp=$(mktemp)
-  register_tmp "${tmp}"
-
+  local host="${3:-}"
   local cp_request_cpu cp_request_memory cp_limit_cpu cp_limit_memory cp_replicas cp_k8s_version
   local syncer_request_cpu syncer_request_memory syncer_limit_cpu syncer_limit_memory
   local ingress_enabled="false"
-  if (( VCLUSTER_ENABLE_INGRESS )); then
-    ingress_enabled="true"
-  fi
+  (( VCLUSTER_ENABLE_INGRESS )) && ingress_enabled="true"
   if [[ -n "${host}" ]]; then
-    vc::debug "Configurando host do vcluster ${cluster} para ${host}"
+    vc::debug "Configurando host do vcluster para ${host}"
   fi
 
   if [[ "${profile}" == "private" ]]; then
@@ -236,6 +248,12 @@ vc::values_for_profile() {
   fi
   vc::debug "Gerando values para profile=${profile} namespace=${namespace} (cp requests=${cp_request_cpu}/${cp_request_memory})"
 
+  local tmpdir tmp
+  tmpdir="${STATE_DIR}/vcluster-values"
+  mkdir -p "${tmpdir}"
+  tmp=$(mktemp "${tmpdir}/${profile}.${namespace}.XXXX.yaml")
+  register_tmp "${tmp}"
+
   {
     cat <<EOF
 controlPlane:
@@ -262,8 +280,11 @@ EOF
       limits:
         cpu: ${cp_limit_cpu}
         memory: ${cp_limit_memory}
+
   service:
     enabled: true
+    spec:
+      type: ${VCLUSTER_SERVICE_TYPE}
 EOF
     if [[ "${VCLUSTER_SERVICE_TYPE}" == "LoadBalancer" && -n "${VCLUSTER_METALLB_POOL}" ]]; then
       cat <<EOF
@@ -271,15 +292,11 @@ EOF
       metallb.universe.tf/address-pool: ${VCLUSTER_METALLB_POOL}
 EOF
     fi
-    cat <<EOF
-    spec:
-      type: ${VCLUSTER_SERVICE_TYPE}
-EOF
     if [[ -n "${host}" ]]; then
       cat <<EOF
-  proxy:
-    extraSANs:
-      - ${host}
+  # proxy:
+  #   extraSANs:
+  #     - ${host}
   ingress:
     enabled: ${ingress_enabled}
     host: ${host}
@@ -323,9 +340,32 @@ vc::vcluster_service_name() {
   local namespace="$1"
   local cluster="$2"
   local selector="vcluster.loft.sh/managed-by=${cluster}"
-  local svc
+  local svc="" candidates first=""
 
-  svc=$(kubectl -n "${namespace}" get svc -l "${selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if kubectl -n "${namespace}" get svc "${cluster}" >/dev/null 2>&1; then
+    svc="${cluster}"
+  elif kubectl -n "${namespace}" get svc "vcluster-${cluster}" >/dev/null 2>&1; then
+    svc="vcluster-${cluster}"
+  else
+    candidates=$(kubectl -n "${namespace}" get svc -l "app=vcluster,release=${cluster}" -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+    if [[ -z "${candidates}" ]]; then
+      candidates=$(kubectl -n "${namespace}" get svc -l "${selector}" -o jsonpath='{range .items[?(@.spec.type=="LoadBalancer")]}{.metadata.name}{"\n"}{end}' 2>/dev/null || true)
+    fi
+    if [[ -n "${candidates}" ]]; then
+      while IFS= read -r candidate; do
+        [[ -n "${candidate}" ]] || continue
+        svc="${candidate}"
+        break
+      done <<<"${candidates}"
+    fi
+    if [[ -z "${svc}" ]]; then
+      svc=$(kubectl -n "${namespace}" get svc -l "app=vcluster,release=${cluster}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    fi
+    if [[ -z "${svc}" ]]; then
+      svc=$(kubectl -n "${namespace}" get svc -l "${selector}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+    fi
+  fi
+
   if [[ -z "${svc}" ]]; then
     if kubectl -n "${namespace}" get svc "${cluster}" >/dev/null 2>&1; then
       svc="${cluster}"
@@ -340,26 +380,38 @@ vc::vcluster_service_name() {
 vc::discover_service_ip() {
   local namespace="$1"
   local cluster="$2"
-  local svc ip
+  local svc="" ip external_ip cluster_ip
 
-  svc=$(vc::vcluster_service_name "${namespace}" "${cluster}")
+  for attempt in {1..12}; do
+    svc=$(vc::vcluster_service_name "${namespace}" "${cluster}")
+    [[ -n "${svc}" ]] && break
+    vc::debug "Service principal ainda não disponível para ${cluster}; aguardando..."
+    sleep 5
+  done
   if [[ -z "${svc}" ]]; then
     vc::debug "Nenhum Service encontrado para ${cluster} em ${namespace}"
     return 1
   fi
 
   vc::debug "Aguardando IP para Service ${namespace}/${svc}"
-  ip=$(wait_for_lb_ip "${namespace}" "${svc}" 180 || true)
-  if [[ -z "${ip}" ]]; then
-    ip=$(kubectl -n "${namespace}" get svc "${svc}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
-  fi
+  external_ip=$(wait_for_lb_ip "${namespace}" "${svc}" 180 || true)
+  cluster_ip=$(kubectl -n "${namespace}" get svc "${svc}" -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)
 
-  if [[ -n "${ip}" ]]; then
-    vc::debug "IP detectado para ${cluster}: ${ip}"
+  if [[ -n "${external_ip}" ]]; then
+    ip="${external_ip}"
+    vc::debug "IP externo detectado para ${cluster}: ${external_ip}"
+  elif [[ -n "${cluster_ip}" ]]; then
+    ip="${cluster_ip}"
+    vc::debug "Utilizando ClusterIP ${cluster_ip} para ${cluster}"
   else
     vc::debug "Não foi possível determinar IP para ${cluster}/${namespace}"
+    return 1
   fi
-  [[ -n "${ip}" ]] || return 1
+
+  if [[ -n "${cluster_ip}" ]]; then
+    save_state_var "$(vc::state_key "${cluster}" "SERVICE_CLUSTER_IP")" "${cluster_ip}"
+  fi
+
   printf '%s\n' "${ip}"
 }
 
@@ -384,13 +436,13 @@ vc::ensure_tenant_overlay() {
   vc::debug "Atualizando overlay do tenant ${tenant} em ${overlay_dir} (Service IP=${service_ip})"
 
   local kustom_file="${overlay_dir}/kustomization.yaml"
-  if [[ ! -f "${kustom_file}" ]]; then
-    cat >"${kustom_file}" <<EOF
+  cat >"${kustom_file}" <<EOF
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: ${TENANT_TARGET_NAMESPACE}
 resources:
   - ../../base
+  - cilium-network-policy.yaml
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
@@ -406,7 +458,6 @@ secretGenerator:
 patches:
   - path: ingress-patch.yaml
 EOF
-  fi
 
   cat >"${overlay_dir}/app.env" <<EOF
 # Arquivo gerado automaticamente por scripts/vcluster/create.sh
@@ -448,6 +499,87 @@ spec:
                 name: adb-api
                 port:
                   number: 80
+EOF
+
+  cat >"${overlay_dir}/cilium-network-policy.yaml" <<EOF
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: adb-api-tenant-guard
+spec:
+  endpointSelector:
+    matchLabels:
+      app: adb-api
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "ingress-nginx"
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
+            app: postgres
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "kube-system"
+            "k8s:k8s-app": "kube-dns"
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
+    - toCIDRSet:
+        - cidr: "0.0.0.0/0"
+      toPorts:
+        - ports:
+            - port: "80"
+              protocol: TCP
+            - port: "443"
+              protocol: TCP
+---
+apiVersion: cilium.io/v2
+kind: CiliumNetworkPolicy
+metadata:
+  name: adb-postgres-tenant-guard
+spec:
+  endpointSelector:
+    matchLabels:
+      app: postgres
+  ingress:
+    - fromEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
+            app: adb-api
+      toPorts:
+        - ports:
+            - port: "5432"
+              protocol: TCP
+  egress:
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
+    - toEndpoints:
+        - matchLabels:
+            "k8s:io.kubernetes.pod.namespace": "kube-system"
+            "k8s:k8s-app": "kube-dns"
+      toPorts:
+        - ports:
+            - port: "53"
+              protocol: TCP
+            - port: "53"
+              protocol: UDP
 EOF
 
   vc::debug "Hosts do tenant ${tenant}: API=${api_host} Interpolation=${interpolation_host}"
@@ -515,7 +647,11 @@ vc::refresh_tenant_overlays() {
 vc::apply_private_network_policies() {
   local namespace="$1"
   vc::debug "Aplicando políticas de rede privadas em ${namespace}"
-  kubectl apply -n "${namespace}" -f - <<EOF
+  local tmp
+  tmp=$(mktemp)
+  register_tmp "${tmp}"
+  {
+    cat <<EOF
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
@@ -555,6 +691,18 @@ spec:
         protocol: TCP
       - port: "443"
         protocol: TCP
+EOF
+    if [[ -n "${VC_K8S_API_IP}" ]]; then
+      cat <<EOF
+  - toCIDRSet:
+    - cidr: "${VC_K8S_API_IP}/32"
+    toPorts:
+    - ports:
+      - port: "443"
+        protocol: TCP
+EOF
+    fi
+    cat <<EOF
   - toEndpoints:
     - matchLabels:
         "k8s:io.kubernetes.pod.namespace": "${SHARED_VCLUSTER_NAMESPACE}"
@@ -573,12 +721,32 @@ spec:
     - matchLabels:
         "k8s:io.kubernetes.pod.namespace": "ingress-nginx"
 EOF
+  } >"${tmp}"
+  if (( VC_DEBUG )); then
+    vc::debug "Manifesto CNP temporário (${tmp}):"
+    vc::debug "$(sed 's/^/  /' "${tmp}")"
+  fi
+  if ! kubectl apply -n "${namespace}" -f "${tmp}" --server-side --force-conflicts >/dev/null; then
+    vc::phase_fail "${namespace#${TENANT_NAMESPACE_PREFIX}}" "falha aplicar CNP"
+    log "Falha ao aplicar CiliumNetworkPolicy em ${namespace}. Verifique conectividade com o API server."
+    return 1
+  fi
+  if (( VC_DEBUG )); then
+    local cnp_dump
+    cnp_dump=$(kubectl -n "${namespace}" get ciliumnetworkpolicy allow-private-essential-egress -o yaml 2>/dev/null || true)
+    if [[ -n "${cnp_dump}" ]]; then
+      vc::debug "CNP allow-private-essential-egress aplicada:"
+      vc::debug "$(sed 's/^/  /' <<<"${cnp_dump}")"
+    else
+      vc::debug "CNP allow-private-essential-egress ainda não disponível em ${namespace}"
+    fi
+  fi
 }
 
 vc::apply_shared_network_policies() {
   local namespace="$1"
   vc::debug "Aplicando políticas de rede compartilhadas em ${namespace}"
-  kubectl apply -n "${namespace}" -f - <<EOF
+  kubectl apply -n "${namespace}" -f - >/dev/null <<EOF
 apiVersion: "cilium.io/v2"
 kind: CiliumNetworkPolicy
 metadata:
@@ -629,6 +797,10 @@ EOF
 vc::apply_network_policies() {
   local namespace="$1"
   local profile="$2"
+  if (( ${VC_DISABLE_NETWORK_POLICIES:-0} )); then
+    vc::debug "VC_DISABLE_NETWORK_POLICIES=1 – pulando aplicação de CiliumNetworkPolicy em ${namespace}"
+    return 0
+  fi
   if [[ "${profile}" == "private" ]]; then
     vc::apply_private_network_policies "${namespace}"
     vc::debug "Política private aplicada em ${namespace}"
@@ -648,12 +820,14 @@ vc::publish_monitoring_secret() {
 
   kubectl -n monitoring create secret generic "vcluster-${cluster_name}-kubeconfig" \
     --from-file=kubeconfig="${kubeconfig_path}" \
-    --dry-run=client -o yaml | kubectl apply -f -
+    --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
   kubectl -n monitoring label secret "vcluster-${cluster_name}-kubeconfig" \
     "adb.tenancy/tenant=${tenant}" \
     "adb.tenancy/role=${role}" \
     --overwrite >/dev/null
+
+  vc::debug "Publicado com sucesso"
 }
 
 vc::cleanup_monitoring_secret() {
@@ -661,7 +835,7 @@ vc::cleanup_monitoring_secret() {
   (( VC_MONITORING_READY )) || return 0
   if kubectl -n monitoring get secret "vcluster-${cluster_name}-kubeconfig" >/dev/null 2>&1; then
     vc::debug "Removendo secret vcluster-${cluster_name}-kubeconfig do monitoring"
-    kubectl -n monitoring delete secret "vcluster-${cluster_name}-kubeconfig"
+    kubectl -n monitoring delete secret "vcluster-${cluster_name}-kubeconfig" >/dev/null
   else
     vc::debug "Nenhum secret de monitoring encontrado para ${cluster_name}"
   fi

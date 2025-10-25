@@ -12,6 +12,19 @@ source "${ROOT_DIR}/scripts/vcluster/common.sh"
 vc::ensure_prereqs
 INGRESS_IP="${VC_INGRESS_IP}"
 
+prompt_manual_execution() {
+  local message="$1"; shift
+  local -a cmd=("$@")
+  log "${message}"
+  printf '  '
+  local token
+  for token in "${cmd[@]}"; do
+    printf '%q ' "${token}"
+  done
+  printf '\n'
+  read -rp $'Execute o comando acima em outro terminal e pressione ENTER para continuar...\n> ' _
+}
+
 IFS=' ' read -r -a TENANT_IDS <<<"${TENANTS:-tenant-a}"
 vc::debug "Tenants alvo: ${TENANT_IDS[*]:-<nenhum>} ENABLE_SHARED_VCLUSTER=${ENABLE_SHARED_VCLUSTER}"
 
@@ -44,16 +57,31 @@ for tenant in "${TENANT_IDS[@]}"; do
   fi
   vc::debug "Processando tenant ${tenant} (cluster=${cluster}) namespace=vcluster-${cluster}"
   [[ "${VC_FORCE_RECREATE}" == "1" ]] && vc::clear_cluster_checkpoint "${cluster}"
-  kubeconfig_path=""
-  if ! kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
-    --tenant "${tenant}" \
-    --cluster "${cluster}" \
-    --namespace "vcluster-${cluster}" \
-    --profile private \
-    --state-key "${state_key}"); then
+  kubeconfig_path="${STATE_DIR}/kubeconfig-${cluster}.yaml"
+  before_ts=""
+  if [[ -f "${kubeconfig_path}" ]]; then
+    before_ts=$(stat -c %Y "${kubeconfig_path}" 2>/dev/null || echo "")
+  fi
+  create_cmd=(
+    bash "${ROOT_DIR}/scripts/vcluster/create.sh"
+    --tenant "${tenant}"
+    --cluster "${cluster}"
+    --namespace "vcluster-${cluster}"
+    --profile private
+    --state-key "${state_key}"
+  )
+  prompt_manual_execution "Execução manual necessária para o vcluster ${cluster}." "${create_cmd[@]}"
+  if [[ ! -f "${kubeconfig_path}" ]]; then
     save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
     vc::clear_cluster_checkpoint "${cluster}"
-    log "Erro no script vcluster/create.sh"
+    log "kubeconfig não encontrado em ${kubeconfig_path}; confirme se o comando foi executado com sucesso."
+    exit 1
+  fi
+  after_ts=$(stat -c %Y "${kubeconfig_path}" 2>/dev/null || echo "")
+  if [[ -n "${before_ts}" && -n "${after_ts}" && "${after_ts}" == "${before_ts}" ]]; then
+    save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+    vc::clear_cluster_checkpoint "${cluster}"
+    log "kubeconfig em ${kubeconfig_path} não foi atualizado; verifique os resultados do comando manual."
     exit 1
   fi
   save_state_var "VCLUSTER_LAST_SUCCEEDED" "${cluster}"
@@ -88,15 +116,31 @@ if [[ "${ENABLE_SHARED_VCLUSTER}" == "1" ]]; then
       log "vcluster ${cluster} já concluído anteriormente; pulando (VC_FORCE_RECREATE=1 para recriar)."
     else
       [[ "${VC_FORCE_RECREATE}" == "1" ]] && vc::clear_cluster_checkpoint "${cluster}"
-      kubeconfig_path=""
-      if ! kubeconfig_path=$(bash "${ROOT_DIR}/scripts/vcluster/create.sh" \
-        --tenant "shared" \
-        --cluster "${cluster}" \
-        --namespace "${SHARED_VCLUSTER_NAMESPACE}" \
-        --profile shared \
-        --state-key "${state_key}"); then
+      kubeconfig_path="${STATE_DIR}/kubeconfig-${cluster}.yaml"
+      before_shared=""
+      if [[ -f "${kubeconfig_path}" ]]; then
+        before_shared=$(stat -c %Y "${kubeconfig_path}" 2>/dev/null || echo "")
+      fi
+      shared_cmd=(
+        bash "${ROOT_DIR}/scripts/vcluster/create.sh"
+        --tenant "shared"
+        --cluster "${cluster}"
+        --namespace "${SHARED_VCLUSTER_NAMESPACE}"
+        --profile shared
+        --state-key "${state_key}"
+      )
+      prompt_manual_execution "Execução manual necessária para o vcluster compartilhado ${cluster}." "${shared_cmd[@]}"
+      if [[ ! -f "${kubeconfig_path}" ]]; then
         save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
         vc::clear_cluster_checkpoint "${cluster}"
+        log "kubeconfig não encontrado em ${kubeconfig_path}; confirme a execução do comando manual."
+        exit 1
+      fi
+      after_shared=$(stat -c %Y "${kubeconfig_path}" 2>/dev/null || echo "")
+      if [[ -n "${before_shared}" && -n "${after_shared}" && "${after_shared}" == "${before_shared}" ]]; then
+        save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+        vc::clear_cluster_checkpoint "${cluster}"
+        log "kubeconfig em ${kubeconfig_path} não foi atualizado; verifique a execução manual."
         exit 1
       fi
       save_state_var "VCLUSTER_LAST_SUCCEEDED" "${cluster}"

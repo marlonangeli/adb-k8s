@@ -168,6 +168,8 @@ else
   log "vcluster ${cluster} (${profile}) criado; kubeconfig em ${kubeconfig_path}"
 fi
 
-printf '%s\n' "${kubeconfig_path}"
+vc::debug "Kubeconfig final salvo em ${kubeconfig_path}"
+mkdir -p "${STATE_DIR}"
+echo "${kubeconfig_path}" > "${STATE_DIR}/last-vcluster-kubeconfig"
 
-exit 0;
+exit 0

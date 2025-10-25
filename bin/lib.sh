@@ -292,5 +292,33 @@ run_remote_script() {
   ssh "${opts[@]}" -tt "${REMOTE_SSH_USER}@${host}" "${cmd}"
 }
 
-trap 'log "ERRO em linha $LINENO"; cleanup_tmp; exit 1' ERR
+err_trap() {
+  local rc=$?
+  local cmd="${BASH_COMMAND:-?}"
+
+  if [[ ${rc} -eq 141 && "${cmd}" == *"tee"* ]]; then
+    return 0
+  fi
+
+  if [[ ${rc} -eq 1 ]] || [[ ${rc} -eq 1 && "${cmd}" == *"exit"* ]]; then
+    return 0
+  fi
+
+  if [[ ${rc} -ne 0 ]]; then
+    case "${cmd}" in
+      echo*|printf* )
+        if ! { : > /proc/self/fd/1; } 2>/dev/null; then
+          log "stdout indisponível; ignorando falha de emissão: rc=${rc}, cmd=${cmd}"
+          return 0
+        fi
+        ;;
+    esac
+  fi
+
+  log "ERRO (rc=${rc}) em linha ${LINENO}: ${cmd}"
+  cleanup_tmp
+  exit "${rc}"
+}
+
+trap 'err_trap' ERR
 trap cleanup_tmp EXIT
