@@ -1,5 +1,11 @@
 # Changelog
 
+## 2025-10-26
+- `bin/95-argocd.sh` agora verifica se o `argocd-application-controller` é StatefulSet ou Deployment antes de aguardar o rollout, evitando falhas na instalação da chart recente.
+- A instalação do Argo CD expõe também o host local `argocd.127-0-0-1.sslip.io`, alinhando o acesso com os demais serviços em HTTP.
+- `adb-api-3` ganhou controles via variáveis `JPA_DDL_AUTO`/`HIBERNATE_DIALECT` e um `schema.sql` que cria a extensão PostGIS automaticamente, eliminando a necessidade de editar `application.properties` ao gerar o schema inicial.
+- Overlays Kustomize dos tenants passam a substituir `ConfigMap`/`Secret` definidos na base, restaurando builds consistentes para os manifests multi-tenant da API.
+
 ## 2025-10-22
 - vCluster values template ajustado para o schema oficial do `vcluster.yaml`: remove campos inválidos, emite `exportKubeConfig.kubeConfigServer`, gera hostnames `sslip.io` consistentes e expõe o control plane via MetalLB/Ingress sem depender de port-forward (`scripts/vcluster/common.sh`, `scripts/vcluster/create.sh`, `scripts/vcluster/remove.sh`, `env.sh`).
 

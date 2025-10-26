@@ -15,7 +15,9 @@ vc::load_defaults
 
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
 ARGOCD_HOSTNAME=$(resolve_hostname "${ARGOCD_HOST_OVERRIDE:-}" "argocd")
+ARGOCD_LOCAL_HOSTNAME=$(local_sslip_host "argocd")
 save_state_var "ARGOCD_HOSTNAME" "${ARGOCD_HOSTNAME}"
+save_state_var "ARGOCD_LOCAL_HOSTNAME" "${ARGOCD_LOCAL_HOSTNAME}"
 
 values_file=$(mktemp)
 register_tmp "${values_file}"
@@ -29,9 +31,11 @@ server:
   ingress:
     enabled: true
     ingressClassName: nginx
-    hosts:
-      - ${ARGOCD_HOSTNAME}
-    tls: []
+    hostname: ${ARGOCD_HOSTNAME}
+    extraHosts:
+      - name: ${ARGOCD_LOCAL_HOSTNAME}
+        path: /
+    tls: false
   service:
     type: ClusterIP
 configs:
@@ -51,9 +55,15 @@ helm upgrade --install argocd argo/argo-cd \
 
 wait_rollout "${ARGOCD_NAMESPACE}" deployment argocd-server
 wait_rollout "${ARGOCD_NAMESPACE}" deployment argocd-repo-server
-wait_rollout "${ARGOCD_NAMESPACE}" deployment argocd-application-controller
+if kubectl -n "${ARGOCD_NAMESPACE}" get statefulset argocd-application-controller >/dev/null 2>&1; then
+  wait_rollout "${ARGOCD_NAMESPACE}" statefulset argocd-application-controller
+elif kubectl -n "${ARGOCD_NAMESPACE}" get deployment argocd-application-controller >/dev/null 2>&1; then
+  wait_rollout "${ARGOCD_NAMESPACE}" deployment argocd-application-controller
+else
+  log "controller argocd-application-controller não encontrado como StatefulSet ou Deployment; verifique a instalação."
+fi
 
-log "Argo CD disponível via http://${ARGOCD_HOSTNAME} (TLS desabilitado por padrão)."
+log "Argo CD disponível via http://${ARGOCD_HOSTNAME} e http://${ARGOCD_LOCAL_HOSTNAME} (TLS desabilitado por padrão)."
 
 kubectl apply -f "${ROOT_DIR}/manifests/argocd/project-tenants.yaml"
 
