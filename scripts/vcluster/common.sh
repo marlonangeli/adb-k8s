@@ -466,6 +466,8 @@ PUBLIC_BASE_URL=http://${api_host}
 INTERPOLATION_BASE_URL=http://${interpolation_host}
 INTERPOLATION_LOAD_BALANCER_MODE=least_conn
 JAVA_OPTS=-Xms512m -Xmx1500m
+JPA_DDL_AUTO=none
+HIBERNATE_DIALECT=org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
 EOF
 
   if [[ ! -f "${overlay_dir}/secrets.env" ]]; then

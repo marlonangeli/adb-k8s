@@ -121,3 +121,12 @@ export JOIN_SCRIPT_PATH="${JOIN_SCRIPT_PATH:-/root/join-worker.sh}"
 # Estado / logs
 export STATE_DIR="/var/opt/cluster-state"
 export LOG_FILE="/var/log/cluster-install.log"
+
+if [[ $- == *i* ]]; then
+  __ADB_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+  if [[ -z "${ADB_PROMPT_CTX_DISABLED:-}" && -f "${__ADB_ENV_DIR}/scripts/vcluster/prompt.sh" ]]; then
+    # shellcheck disable=SC1091
+    source "${__ADB_ENV_DIR}/scripts/vcluster/prompt.sh"
+  fi
+  unset __ADB_ENV_DIR
+fi
