@@ -464,10 +464,13 @@ EOF
 TENANT_ID=${tenant}
 PUBLIC_BASE_URL=http://${api_host}
 INTERPOLATION_BASE_URL=http://${interpolation_host}
-INTERPOLATION_LOAD_BALANCER_MODE=least_conn
-JAVA_OPTS=-Xms512m -Xmx1500m
-JPA_DDL_AUTO=none
-HIBERNATE_DIALECT=org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
+  INTERPOLATION_LOAD_BALANCER_MODE=least_conn
+  JAVA_OPTS=-Xms512m -Xmx1500m
+  JPA_DDL_AUTO=none
+  HIBERNATE_DIALECT_RUNTIME=org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
+  HIBERNATE_DIALECT_SEED=org.hibernate.dialect.PostgreSQLDialect
+  JPA_DDL_AUTO_SEED=create
+  SEED_EXTRA_ARGS=
 EOF
 
   if [[ ! -f "${overlay_dir}/secrets.env" ]]; then

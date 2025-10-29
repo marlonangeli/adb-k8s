@@ -1,5 +1,11 @@
 # Changelog
 
+## 2025-10-29
+- ADB API passou a aguardar o PostgreSQL ficar saudável antes de subir os pods; um Job dedicado executa o seed com o dialeto padrão do PostgreSQL e marca a conclusão para reinicializações futuras, mantendo o runtime em PostGIS. (`adb-api-3/k8s/base/job-adb-api-seed.yaml`, `adb-api-3/k8s/base/deployment-adb-api.yaml`)
+- O StatefulSet do PostgreSQL define `PGDATA` em um subdiretório, evitando novos `CrashLoopBackOff` em volumes Longhorn com `lost+found`. (`adb-api-3/k8s/base/statefulset-postgres.yaml`)
+- Configurações dos tenants agora distinguem dialetos de seed/tempo de execução, controlam `JPA_DDL_AUTO` independente para o seed e permitem argumentos extras; o gerador de manifests replica os novos campos. (`adb-api-3/k8s/base/configmap-app-settings.yaml`, `adb-api-3/k8s/tenants/*/app.env`, `scripts/vcluster/common.sh`)
+- Estratégias de autoescalonamento foram ajustadas para ambientes com menos headroom: `adb-api` escala de 1 a 5 réplicas e a `adb-interpolation-api` de 1 a 10. (`adb-api-3/k8s/base/hpa-adb-api.yaml`, `adb-interpolation-api/k8s/base/hpa.yaml`)
+
 ## 2025-10-26
 - `bin/95-argocd.sh` agora verifica se o `argocd-application-controller` é StatefulSet ou Deployment antes de aguardar o rollout, evitando falhas na instalação da chart recente.
 - A instalação do Argo CD expõe também o host local `argocd.127-0-0-1.sslip.io`, alinhando o acesso com os demais serviços em HTTP.
