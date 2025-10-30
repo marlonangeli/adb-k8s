@@ -78,6 +78,17 @@
 - Aplicar limites de requests/limits aos componentes oportunistas (ex.: pods de observabilidade) para evitar picos simultâneos.
 - Considerar spool local para Longhorn backups ou desativar `backup cleanup-all-mounts` se não usado.
 
+## Constatações de 29/10/2025 (19h-20h)
+- **MetalLB**: `controller-6599cd9c46-kvh6s` e `speaker-7r5hx` (ambos em `marlon-tcc-vm3`) permanecem em `CrashLoopBackOff`. Os probes HTTP para `:7472/metrics` retornam `connection refused`, sugerindo que os bins não chegam a expor métricas antes do watchdog matar o processo (latência de disco ou kubelet indisponível). Tentativas de `kubectl logs` esbarram em `TLS handshake timeout` via `10250`, indicando saturação do kubelet na mesma máquina.
+- **Ingress-NGINX**: réplica `ingress-nginx-controller-7cb459f86f-shfkt` (também em `marlon-tcc-vm3`) reinicia com frequência. Eventos mostram erros de reload (`invalid PID number "" em /tmp/nginx/nginx.pid`) e timeouts no healthz, consistentes com FS lento ou kubelet sem resposta.
+- **Monitoring (kube-prometheus-stack)**: operator, kube-state-metrics, Grafana e Prometheus acusam `context deadline exceeded` nos probes, e o node-exporter registra `NodeNotReady` quando o kubelet do host não responde. Mesmo `kubectl describe` no operator experimenta timeout.
+- **vClusters**: 
+  - `vcluster-abc`: pod `abc-69465889f6-b5qpb` reiniciou 89 vezes nas últimas 18h.
+  - `vcluster-shared`: pod `shared-5bfc7b6dd8-8mfr5` reiniciou 85 vezes.
+  - `vcluster list` falha por timeout, presumivelmente pelo mesmo gargalo no API server/kubelet.
+- **kubelet em marlon-tcc-vm3 (192.168.30.54)**: todas as requisições de logs via `https://192.168.30.54:10250/...` retornam `TLS handshake timeout`, o que reforça a hipótese de que o host está travando no I/O (etcd e outros componentes críticos residem nele).
+- **Namespace vcluster-xyz**: estava travado em `Terminating` devido ao finalizer `controller.cattle.io/namespace-auth` (Rancher). Removido com `kubectl patch` e, em seguida, concluído forçadamente via `kubectl replace --raw "/api/v1/namespaces/vcluster-xyz/finalize" -f <manifest>`. Após a operação o namespace sumiu (`Error from server (NotFound)`), liberando o overlay antigo.
+
 ## Substituição do Longhorn (se necessário)
 Manter o escopo do TCC requer persistência distribuída, suporte a PVCs e compatibilidade com workloads já planejados. Alternativas:
 
@@ -105,10 +116,11 @@ Manter o escopo do TCC requer persistência distribuída, suporte a PVCs e compa
 - Realizar testes de failover e restauração antes de cortar o Longhorn.
 
 ## Resumo de Comandos Executados Durante a Análise
-- Diagnóstico de pods: `kubectl get pods -A`, `kubectl logs ...`, `kubectl describe ...`.
-- Eventos: `kubectl get events -A --sort-by=.lastTimestamp | tail`.
+- Diagnóstico de pods: `kubectl get pods -A`, `kubectl get pods -n metallb-system`, `kubectl get pods -n ingress-nginx`, `kubectl get pods -n monitoring`, `kubectl get pods -n vcluster-abc`, `kubectl get pods -n vcluster-shared`, `kubectl describe pod ...`.
+- Eventos: `kubectl get events -A --sort-by=.lastTimestamp | tail`, `kubectl get events -n metallb-system --sort-by=.lastTimestamp`, `kubectl get events -n monitoring --sort-by=.lastTimestamp`.
 - Métricas host: `kubectl debug node/... -- chroot /host top -bn1`, `df -h`, `du -sh /var/lib/etcd`.
 - Longhorn logs: `kubectl logs -n longhorn-system longhorn-manager-5zncr`.
+- Finalização forçada do namespace: `kubectl patch namespace vcluster-xyz --type=merge -p '{"metadata":{"finalizers":[]}}'`, `kubectl replace --raw "/api/v1/namespaces/vcluster-xyz/finalize" -f <manifest>`.
 - Limpeza de pods de debug após cada execução (`kubectl delete pod node-debugger-...`).
 
 ## Recomendações Finais
@@ -117,4 +129,3 @@ Manter o escopo do TCC requer persistência distribuída, suporte a PVCs e compa
 3. Automatizar coleta de métricas de I/O (Prometheus / node-exporter) para identificar rapidamente novos picos.
 4. Validar continuamente ingress, MetalLB, Cilium e monitoring após cada ação, pois são essenciais para o funcionamento dos vClusters e do TCC.
 5. Documentar, em caso de substituição do Longhorn, como os desenvolvedores e usuários acedem aos novos volumes e rotinas de backup.
-
