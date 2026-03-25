@@ -14,6 +14,17 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 4. **Cadeia GitOps** – demonstrar que alterações de manifestos aplicadas via
    Git são sincronizadas automaticamente pelo Argo CD.
 
+## Atualização critica para OKE (2026-03)
+
+- A substituicao de `ingress-nginx` no caminho OKE e obrigatoria antes do
+  primeiro deploy confiavel.
+- Os testes de entrada devem validar o modelo escolhido para OKE:
+  - `Ingress` com OCI Native Ingress Controller, ou
+  - `Gateway`/`HTTPRoute` com controlador Gateway API (Envoy, Istio add-on,
+    Traefik).
+- Evite cenarios dependentes de `sslip.io` no fluxo OKE; use DNS real do
+  ambiente alvo.
+
 ## Testes de uso de recursos
 
 1. Gere carga com os scripts k6 (`tenant-ramp.js`, `shared-interpolation.js`).
@@ -43,14 +54,19 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 
 ## Testes de segurança entre tenants
 
-1. Conecte-se ao vCluster do tenant A e tente acessar o host da API do tenant B
-   (`curl http://api-tenant-b.<ip>.sslip.io`). A CiliumNetworkPolicy deve negar
-   o tráfego (timeout ou conexão recusada).
-2. Valide que somente o namespace `ingress-nginx` e o próprio tenant conseguem
-   atingir a API (`kubectl --kubeconfig tenant-a.kubeconfig run curl --rm -it`
-   com imagem `curlimages/curl`).
-3. Verifique no Hubble UI se há fluxos bloqueados (vermelho) ao tentar acesso
-   cruzado – evidencie com captura para o relatório.
+1. Execute o baseline automatizado:
+   ```bash
+   cd /home/ilegna/Work/tcc/adb-k8s
+   scripts/validate-tenant-routing-isolation.sh
+   ```
+   O script valida:
+   - `adb-api-3` sem `Ingress` e sem `LoadBalancer` por tenant;
+   - acesso do tenant apenas à sua própria API;
+   - acesso dos tenants à API compartilhada de interpolação.
+2. Para validação explícita de bloqueio cruzado, execute o mesmo script com URLs
+   de teste (`--a-to-b-url` e `--b-to-a-url`) e confirme status de bloqueio.
+3. Como evidência complementar, verifique no Hubble UI fluxos negados ao tentar
+   acesso cruzado e anexe capturas no relatório.
 
 ## Sincronização GitOps
 
@@ -59,10 +75,10 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 2. Faça commit e push no repositório correspondente.
 3. Execute `bin/95-argocd.sh` para garantir que o Argo CD tenha o vCluster
    registrado.
-4. No Argo CD (`http://argocd.<ip>.sslip.io`), verifique se a Application do
+4. No Argo CD (`http://argocd.<dominio-do-lb>`), verifique se a Application do
    tenant entrou em estado *OutOfSync* e depois voltou a *Synced*.
-5. Confirme via `kubectl --kubeconfig tenant-a.kubeconfig get ingress adb-api`
-   que o host foi atualizado.
+5. Confirme que a rota de entrada foi atualizada no recurso correspondente:
+   `Ingress` (OCI Native Ingress) ou `HTTPRoute` (Gateway API).
 
 ## Considerações sobre o Liqo
 

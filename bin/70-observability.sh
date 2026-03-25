@@ -14,13 +14,13 @@ ensure_helm
 
 GRAFANA_HOSTNAME=$(resolve_hostname "${GRAFANA_HOST_OVERRIDE:-}" "grafana")
 GRAFANA_LOCAL_HOSTNAME=$(local_sslip_host "grafana")
-INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
 kubectl create ns monitoring || true
 
-if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
+if [[ "${TLS_ENABLED:-0}" == "1" && "${PLATFORM_MODE:-baremetal}" != "oke" ]]; then
   if kubectl -n monitoring get secret grafana-tls >/dev/null 2>&1; then
     log "certificado grafana-tls já existe; reutilizando emissão anterior."
   else
+    INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute primeiro o script do ingress."; exit 1; }
     apply_certificate "monitoring" "grafana-tls" "grafana-tls" "${INGRESS_IP}" \
       "${GRAFANA_HOSTNAME}" "${GRAFANA_LOCAL_HOSTNAME}"
   fi
@@ -77,10 +77,6 @@ helm_args=(
   --timeout 15m
   --set grafana.adminUser="${GRAFANA_ADMIN_USER}"
   --set grafana.adminPassword="${GRAFANA_ADMIN_PASSWORD}"
-  --set grafana.ingress.enabled=true
-  --set grafana.ingress.ingressClassName=nginx
-  --set grafana.ingress.hosts[0]="${GRAFANA_HOSTNAME}"
-  --set grafana.ingress.hosts[1]="${GRAFANA_LOCAL_HOSTNAME}"
   --set grafana.resources.requests.cpu=100m
   --set grafana.resources.requests.memory=192Mi
   --set grafana.resources.limits.cpu=500m
@@ -110,7 +106,20 @@ helm_args=(
   --set global.scrapeInterval=60s
 )
 
-if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  helm_args+=(--set grafana.ingress.enabled=false)
+  helm_args+=(--set grafana.service.type=LoadBalancer)
+  helm_args+=(--set grafana.service.annotations.oci\.oraclecloud\.com/load-balancer-type=nlb)
+  helm_args+=(--set-string grafana.service.annotations.oci-network-load-balancer\.oraclecloud\.com/internal=true)
+  helm_args+=(--set-string grafana.service.annotations.oci\.oraclecloud\.com/security-rule-management-mode=NSG)
+else
+  helm_args+=(--set grafana.ingress.enabled=true)
+  helm_args+=(--set grafana.ingress.ingressClassName=nginx)
+  helm_args+=(--set grafana.ingress.hosts[0]="${GRAFANA_HOSTNAME}")
+  helm_args+=(--set grafana.ingress.hosts[1]="${GRAFANA_LOCAL_HOSTNAME}")
+fi
+
+if [[ "${TLS_ENABLED:-0}" == "1" && "${PLATFORM_MODE:-baremetal}" != "oke" ]]; then
   helm_args+=(--set grafana.ingress.tls[0].hosts[0]="${GRAFANA_HOSTNAME}")
   helm_args+=(--set grafana.ingress.tls[0].hosts[1]="${GRAFANA_LOCAL_HOSTNAME}")
   helm_args+=(--set grafana.ingress.tls[0].secretName="grafana-tls")
@@ -147,7 +156,16 @@ fi
 
 save_state_var "GRAFANA_HOSTNAME" "${GRAFANA_HOSTNAME}"
 save_state_var "GRAFANA_LOCAL_HOSTNAME" "${GRAFANA_LOCAL_HOSTNAME}"
-if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
+
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  grafana_endpoint="$(wait_for_lb_ip monitoring kube-prometheus-stack-grafana 300 || true)"
+  if [[ -n "${grafana_endpoint}" ]]; then
+    save_state_var "GRAFANA_HOSTNAME" "${grafana_endpoint}"
+    log "Grafana disponível em http://${grafana_endpoint} (LoadBalancer interno OKE)."
+  else
+    log "Grafana instalado; endpoint LoadBalancer interno não disponível no tempo esperado."
+  fi
+elif [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   log "Grafana disponível em https://${GRAFANA_HOSTNAME} e https://${GRAFANA_LOCAL_HOSTNAME}"
 else
   log "Grafana disponível em http://${GRAFANA_HOSTNAME} e http://${GRAFANA_LOCAL_HOSTNAME}"

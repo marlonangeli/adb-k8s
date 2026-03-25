@@ -3,6 +3,7 @@
 ### Contexto
 - Cluster OKE já criado via Terraform (`infra-oci/oracle-cloud/kubernetes`) com CNI **OCI VCN-Native** e node pool ARM (A1.Flex).
 - Objetivo: manter a stack do TCC (vCluster multi-tenant, Argo CD/GitOps, observabilidade, autoscaling opcional) trocando apenas o que não faz sentido em OKE (MetalLB, kube-proxy-free, etc.).
+- Risco externo atualizado: a documentação da Oracle para OKE agora destaca o encerramento de manutenção do NGINX Ingress Controller (anunciado pela comunidade Kubernetes para mar/2026), exigindo priorização da migração.
 
 ### Networking e segurança
 - **CNI**: manter OCI VCN-Native para IP direto no VCN; complementar com **Calico em policy-only** para implementar NetworkPolicy (CNI nativa não aplica policies). A Oracle documenta a instalação do Calico policy-only junto ao OCI VCN-Native para habilitar NetworkPolicy. citeturn1search1
@@ -12,8 +13,13 @@
 - **Security Lists/NSG**: restringir regras herdadas do Terraform (abriram NodePorts 30000-32767 e SSH amplo). Recomendar mover para NSGs com escopos mínimos e fechar 10256/NodePort para internet, mantendo apenas LB→workers e bastion restrito.
 
 ### Ingress / Gateway
-- Substituir **ingress-nginx** por **Traefik** usando Gateway API (gatewayclass + httproute/tcproute). Traefik suporta LB nativo e anotação `traefik.io/service.nativelb` para usar o Service IP quando necessário. citeturn0search2turn0search5
-- Services do Traefik expostos como `LoadBalancer` na subnet `lbs` (OCI LB gerenciado); remover qualquer dependência do MetalLB e dos hosts `sslip.io` baseados em VIP local.
+- **Prioridade imediata**: remover `ingress-nginx` do caminho OKE como bloqueio de deploy confiável.
+- **Fase 1 (redução de risco)**: usar **OCI Native Ingress Controller** (modo add-on) para substituir o edge legado mantendo API `Ingress` enquanto os manifests são limpos de dependências bare-metal.
+- **Fase 2 (arquitetura alvo)**: migrar para **Gateway API** (`GatewayClass`, `Gateway`, `HTTPRoute`), escolhendo controlador conforme trade-off operacional:
+  - **Envoy Gateway**: melhor alinhamento com Gateway API e documentação OKE.
+  - **Istio add-on**: ciclo de vida do control plane gerenciado pela Oracle, com maior footprint.
+  - **Traefik**: opção de menor footprint operacional para o projeto, mantendo a direção já considerada no repositório.
+- Services de entrada devem ser expostos como `LoadBalancer` na subnet `lbs` (OCI LB gerenciado); remover dependência de MetalLB e hosts `sslip.io` baseados em VIP local.
 
 ### Armazenamento
 - Manter **Longhorn** conforme tutorial oficial da Oracle para OKE (usa Helm + cloud-init que anexa block volumes). citeturn0search1turn0search7
@@ -43,10 +49,11 @@
 - Calico policy-only é suportado em VCN-Native; confirmar versão 3.30.x no cluster 1.34/1.35 antes de aplicar. citeturn1search2
 - kube-proxy ipvs deixará de ser suportado → usar `mode: nftables` ou `iptables` até NFT ser padrão. citeturn0search0turn0search4
 - Longhorn em OKE requer volumes anexados via cloud-init; sem isso os discos default são só o boot de 100 GiB. citeturn0search6
+- `ingress-nginx` sem manutenção pós mar/2026 aumenta risco de segurança e suporte; não usar como estratégia de destino no OKE.
 
 ### Próximos passos sugeridos
 1) Ajustar Terraform: fechar Security Lists, opcionalmente trocar para NSGs; incluir script de init do Longhorn no node pool; outputs com subnet OCIDs e LB IP.  
-2) Criar charts/values novos: Traefik Gateway API, Longhorn values, Calico manifest policy-only, Cluster Autoscaler.  
+2) Definir e implementar o caminho de edge em duas fases (OCI Native Ingress Controller -> Gateway API) e criar os manifests/charts correspondentes (Envoy/Istio/Traefik conforme decisão final), além de Longhorn values, Calico policy-only e Cluster Autoscaler.  
 3) Refatorar `env.sh`/`Makefile`/`bin/` removendo MetalLB/Cilium/kubeadm; adicionar alvos para Traefik, Calico, Longhorn, autoscaler, vCluster.  
-4) Atualizar manifests das apps e vClusters (StorageClass longhorn, NetworkPolicy padrão, Service/HTTPRoute para Traefik).  
-5) Documentar DNS (Cloudflare/OCI) e roteiro de verificação (kubectl, traefik dashboard, longhorn ui, prometheus).
+4) Atualizar manifests das apps e vClusters (StorageClass longhorn, NetworkPolicy padrão, recursos de rota alinhados ao controlador escolhido: `Ingress` com OCI Native ou `Gateway`/`HTTPRoute`).  
+5) Documentar DNS (Cloudflare/OCI), roteiro de verificação da rota de entrada escolhida e critérios de corte (kubectl, gateway/ingress status, longhorn ui, prometheus).

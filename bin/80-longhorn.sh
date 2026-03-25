@@ -9,16 +9,18 @@ donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 require_commands kubectl envsubst
 ensure_helm
 
-if ! donep "ingress-nginx"; then
-  log "ingress-nginx ainda não foi provisionado; execute bin/50-ingress-nginx.sh antes deste passo."
-  exit 1
-fi
+if [[ "${PLATFORM_MODE:-baremetal}" != "oke" ]]; then
+  if ! donep "ingress-nginx"; then
+    log "ingress-nginx ainda não foi provisionado; execute bin/50-ingress-nginx.sh antes deste passo."
+    exit 1
+  fi
 
-if ! ING_IP_TMP=$(current_ingress_ip 2>/dev/null); then
-  log "Ingress IP não conhecido. Execute bin/50-ingress-nginx.sh e aguarde a atribuição do IP antes de instalar o Longhorn."
-  exit 1
+  if ! ING_IP_TMP=$(current_ingress_ip 2>/dev/null); then
+    log "Ingress IP não conhecido. Execute bin/50-ingress-nginx.sh e aguarde a atribuição do IP antes de instalar o Longhorn."
+    exit 1
+  fi
+  INGRESS_IP="${ING_IP_TMP}"
 fi
-INGRESS_IP="${ING_IP_TMP}"
 
 helm repo add longhorn https://charts.longhorn.io
 helm repo update
@@ -67,6 +69,30 @@ LONGHORN_HOSTNAME=$(resolve_hostname "${LONGHORN_HOST_OVERRIDE:-}" "longhorn")
 LONGHORN_LOCAL_HOSTNAME=$(local_sslip_host "longhorn")
 save_state_var "LONGHORN_HOSTNAME" "${LONGHORN_HOSTNAME}"
 save_state_var "LONGHORN_LOCAL_HOSTNAME" "${LONGHORN_LOCAL_HOSTNAME}"
+
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  kubectl -n longhorn-system patch svc longhorn-frontend --type merge -p '{
+    "spec": {
+      "type": "LoadBalancer"
+    },
+    "metadata": {
+      "annotations": {
+        "oci.oraclecloud.com/load-balancer-type": "nlb",
+        "oci-network-load-balancer.oraclecloud.com/internal": "true",
+        "oci.oraclecloud.com/security-rule-management-mode": "NSG"
+      }
+    }
+  }'
+  longhorn_endpoint="$(wait_for_lb_ip longhorn-system longhorn-frontend 300 || true)"
+  if [[ -n "${longhorn_endpoint}" ]]; then
+    save_state_var "LONGHORN_HOSTNAME" "${longhorn_endpoint}"
+    log "Longhorn UI disponível em http://${longhorn_endpoint} (LoadBalancer interno OKE)."
+  else
+    log "Longhorn instalado; endpoint LoadBalancer interno não disponível no tempo esperado."
+  fi
+  ok "${STEP}"
+  exit 0
+fi
 
 if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   apply_certificate "longhorn-system" "longhorn-tls" "longhorn-tls" "${INGRESS_IP}" \

@@ -14,10 +14,6 @@ ensure_helm
 vc::load_defaults
 
 ARGOCD_NAMESPACE="${ARGOCD_NAMESPACE:-argocd}"
-ARGOCD_HOSTNAME=$(resolve_hostname "${ARGOCD_HOST_OVERRIDE:-}" "argocd")
-ARGOCD_LOCAL_HOSTNAME=$(local_sslip_host "argocd")
-save_state_var "ARGOCD_HOSTNAME" "${ARGOCD_HOSTNAME}"
-save_state_var "ARGOCD_LOCAL_HOSTNAME" "${ARGOCD_LOCAL_HOSTNAME}"
 
 values_file=$(mktemp)
 register_tmp "${values_file}"
@@ -28,16 +24,12 @@ global:
 server:
   extraArgs:
     - --insecure
-  ingress:
-    enabled: true
-    ingressClassName: nginx
-    hostname: ${ARGOCD_HOSTNAME}
-    extraHosts:
-      - name: ${ARGOCD_LOCAL_HOSTNAME}
-        path: /
-    tls: false
   service:
-    type: ClusterIP
+    type: LoadBalancer
+    annotations:
+      oci.oraclecloud.com/load-balancer-type: "nlb"
+      oci-network-load-balancer.oraclecloud.com/internal: "true"
+      oci.oraclecloud.com/security-rule-management-mode: "NSG"
 configs:
   cm:
     timeout.reconciliation: 30s
@@ -63,7 +55,16 @@ else
   log "controller argocd-application-controller não encontrado como StatefulSet ou Deployment; verifique a instalação."
 fi
 
-log "Argo CD disponível via http://${ARGOCD_HOSTNAME} e http://${ARGOCD_LOCAL_HOSTNAME} (TLS desabilitado por padrão)."
+ARGOCD_ENDPOINT="${ARGOCD_HOST_OVERRIDE:-}"
+if [[ -z "${ARGOCD_ENDPOINT}" ]]; then
+  ARGOCD_ENDPOINT="$(wait_for_lb_ip "${ARGOCD_NAMESPACE}" argocd-server 300 || true)"
+fi
+if [[ -n "${ARGOCD_ENDPOINT}" ]]; then
+  save_state_var "ARGOCD_HOSTNAME" "${ARGOCD_ENDPOINT}"
+  log "Argo CD disponível via http://${ARGOCD_ENDPOINT} (TLS desabilitado por padrão)."
+else
+  log "Argo CD instalado, mas não foi possível descobrir endpoint LoadBalancer automaticamente."
+fi
 
 kubectl apply -f "${ROOT_DIR}/manifests/argocd/project-tenants.yaml"
 

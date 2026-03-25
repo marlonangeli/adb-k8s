@@ -75,9 +75,12 @@ vc::debug "Parâmetros recebidos: tenant=${tenant} cluster=${cluster} namespace=
 
 vc::ensure_namespace "${namespace}" "${tenant}" "${profile}"
 
-vcluster_host="$(vc::hostname_for_cluster "${cluster}")"
-vc::debug "Host sugerido para ${cluster}: ${vcluster_host}"
-values_file="$(vc::values_for_profile "${profile}" "${namespace}" "${cluster}" "${vcluster_host}")"
+vcluster_host=""
+if [[ "${VCLUSTER_ENABLE_INGRESS:-0}" == "1" ]]; then
+  vcluster_host="$(vc::hostname_for_cluster "${cluster}")"
+  vc::debug "Host sugerido para ${cluster}: ${vcluster_host}"
+fi
+values_file="$(vc::values_for_profile "${profile}" "${namespace}" "${vcluster_host}")"
 vc::debug "Values temporário gerado em ${values_file}"
 
 kubeconfig_tmp=$(mktemp)

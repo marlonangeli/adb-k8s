@@ -45,6 +45,7 @@
 │   ├─ 90-vcluster.sh
 │   └─ 95-argocd.sh
 ├─ scripts/
+│   ├─ validate-tenant-routing-isolation.sh  # valida isolamento entre tenants + API compartilhada
 │   └─ vcluster/          # helpers para criar/atualizar/remover vclusters manualmente
 └─ manifests/            # templates processados com envsubst
     ├─ cilium.values.yaml
@@ -91,6 +92,7 @@
 
 ### Testes e observabilidade
 
+- Execute `scripts/validate-tenant-routing-isolation.sh` (ou `make validate-tenant-routing`) para validar rapidamente o baseline de isolamento no OKE: API privada por tenant, sem Ingress da API de dados e acesso compartilhado à interpolação.
 - Utilize os scripts `tests/k6/*.js` como base para smoke, ramp-up e validação da API compartilhada; exporte os resultados (`--out json=...`) e registre no TCC.
 - Após cada execução, configure o Grafana (dados de Kubernetes) e o Hubble com os kubeconfigs exportados para coletar métricas e fluxos.
 - Consulte `docs/testing-guidelines.md` para um roteiro completo cobrindo uso de recursos, escalabilidade, segurança, GitOps e a avaliação do Liqo como trabalho futuro.

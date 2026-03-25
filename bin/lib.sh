@@ -151,10 +151,18 @@ resolve_hostname() {
     echo "${override}"
     return
   fi
-  local ip template
-  ip=$(current_ingress_ip) || { log "IP do ingress ainda não disponível (prefixo: ${prefix})"; exit 1; }
-  template="${INGRESS_HOST_TEMPLATE:-%s.%s.sslip.io}"
-  printf "${template}" "${prefix}" "$(sslip_slug "${ip}")"
+  local template ip
+  template="${INGRESS_HOST_TEMPLATE:-%s.%s.${BASE_DOMAIN:-adb.internal}}"
+  ip="$(current_ingress_ip || true)"
+  if [[ -n "${ip}" ]]; then
+    printf "${template}" "${prefix}" "$(sslip_slug "${ip}")"
+    return
+  fi
+  if [[ -n "${BASE_DOMAIN:-}" ]]; then
+    printf '%s.%s' "${prefix}" "${BASE_DOMAIN}"
+    return
+  fi
+  printf '%s.internal' "${prefix}"
 }
 
 sslip_slug() {
@@ -166,7 +174,7 @@ sslip_slug() {
 
 local_sslip_host() {
   local prefix="$1"
-  printf "%s.127-0-0-1.sslip.io" "${prefix}"
+  printf "%s.localhost" "${prefix}"
 }
 
 apply_certificate() {

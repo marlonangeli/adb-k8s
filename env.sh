@@ -1,8 +1,11 @@
 #!/bin/bash
 # shellcheck disable=SC2034
 
-# Inventário de nós
-export CP_IP="192.168.30.52"
+# Platform mode
+export PLATFORM_MODE="${PLATFORM_MODE:-oke}"
+
+# Inventário de nós (legado bare-metal)
+export CP_IP="${CP_IP:-192.168.30.52}"
 export WORKERS=("192.168.30.53" "192.168.30.54")
 export REMOTE_SSH_USER="${REMOTE_SSH_USER:-utfpr}"
 REMOTE_DEFAULT_BASE_DIR="/home/${REMOTE_SSH_USER}/adb-k8s"
@@ -16,19 +19,18 @@ export REMOTE_SSH_OPTIONS="${REMOTE_SSH_OPTIONS:-${REMOTE_DEFAULT_SSH_OPTIONS}}"
 export POD_CIDR="10.10.0.0/16"
 export SVC_CIDR="10.96.0.0/12"
 
-# MetalLB
-export LB_POOL_START="192.168.30.100"
-export LB_POOL_END="192.168.30.120"
-# Deixe em branco para IP dinâmico; defina para fixar manualmente.
-export INGRESS_VIP=""
+# Ingress/LB
+# Deixe em branco para descoberta dinâmica quando aplicável.
+export INGRESS_VIP="${INGRESS_VIP:-}"
 
-# Hostnames (opcionais) - sobrescrevem a geração automática baseada no IP do ingress (formato slug: 192-168-30-100)
+# Hostnames (opcionais)
 export RANCHER_HOST_OVERRIDE=""
 export GRAFANA_HOST_OVERRIDE=""
 export LONGHORN_HOST_OVERRIDE=""
 export HUBBLE_HOST_OVERRIDE=""
 export ARGOCD_HOST_OVERRIDE=""
-export INGRESS_HOST_TEMPLATE="%s.%s.sslip.io"
+export BASE_DOMAIN="${BASE_DOMAIN:-adb.internal}"
+export INGRESS_HOST_TEMPLATE="${INGRESS_HOST_TEMPLATE:-%s.%s.${BASE_DOMAIN}}"
 
 # TLS
 export TLS_ENABLED="${TLS_ENABLED:-0}"
@@ -110,10 +112,14 @@ export SHARED_CONTROL_PLANE_K8S_VERSION="${SHARED_CONTROL_PLANE_K8S_VERSION:-}"
 export VC_TENANT_MANIFEST_ROOT="${VC_TENANT_MANIFEST_ROOT:-${ROOT_DIR}/adb-api-3/k8s/tenants}"
 export VC_INTERPOLATION_OVERLAY_DIR="${VC_INTERPOLATION_OVERLAY_DIR:-${ROOT_DIR}/adb-interpolation-api/k8s/overlays/shared}"
 export VCLUSTER_SERVICE_TYPE="${VCLUSTER_SERVICE_TYPE:-LoadBalancer}"
-export VCLUSTER_METALLB_POOL="${VCLUSTER_METALLB_POOL:-pool-bridge}"
-export VCLUSTER_INGRESS_CLASS="${VCLUSTER_INGRESS_CLASS:-nginx}"
-export VCLUSTER_ENABLE_INGRESS="${VCLUSTER_ENABLE_INGRESS:-1}"
-export VCLUSTER_HOST_TEMPLATE="${VCLUSTER_HOST_TEMPLATE:-vcluster-[cluster].[slug].sslip.io}"
+export VCLUSTER_INGRESS_CLASS="${VCLUSTER_INGRESS_CLASS:-native-oci}"
+export VCLUSTER_ENABLE_INGRESS="${VCLUSTER_ENABLE_INGRESS:-0}"
+export VCLUSTER_HOST_TEMPLATE="${VCLUSTER_HOST_TEMPLATE:-vcluster-[cluster].[slug].${BASE_DOMAIN}}"
+export VCLUSTER_LOAD_BALANCER_TYPE="${VCLUSTER_LOAD_BALANCER_TYPE:-nlb}"
+export VCLUSTER_LOAD_BALANCER_INTERNAL="${VCLUSTER_LOAD_BALANCER_INTERNAL:-true}"
+export VCLUSTER_LB_SECURITY_RULE_MODE="${VCLUSTER_LB_SECURITY_RULE_MODE:-NSG}"
+export SHARED_INTERPOLATION_HOST="${SHARED_INTERPOLATION_HOST:-adb-interpolation-api.processing.svc.cluster.local}"
+export ENABLE_HUBBLE_INGRESS="${ENABLE_HUBBLE_INGRESS:-0}"
 
 # Worker automation
 export JOIN_SCRIPT_PATH="${JOIN_SCRIPT_PATH:-/root/join-worker.sh}"

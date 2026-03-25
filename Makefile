@@ -1,6 +1,6 @@
 SHELL := /bin/bash
 
-all: init-cp cilium workers metallb ingress cert-manager rancher observability longhorn vcluster argocd
+all: cert-manager observability longhorn vcluster argocd
 
 so-requirements:
 	@bin/10-so-requirements.sh
@@ -37,3 +37,6 @@ vcluster:
 
 argocd:
 	@bin/95-argocd.sh
+
+validate-tenant-routing:
+	@scripts/validate-tenant-routing-isolation.sh

@@ -6,6 +6,12 @@ source "$(dirname "$0")/lib.sh"
 STEP="metallb"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  log "PLATFORM_MODE=oke: MetalLB desabilitado no fluxo OKE."
+  ok "${STEP}"
+  exit 0
+fi
+
 require_commands kubectl envsubst
 
 

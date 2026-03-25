@@ -1,5 +1,22 @@
 # Changelog
 
+## 2026-03-18
+- Adicionado script operacional de fácil acesso para validar isolamento entre tenants e roteamento compartilhado no OKE (`scripts/validate-tenant-routing-isolation.sh`), com alvo dedicado no Makefile (`make validate-tenant-routing`) e referências no README/guia de testes/readiness.
+- Fluxo de manifests multi-tenant foi endurecido para OKE: `adb-api-3` deixou de gerar Ingress por tenant, removeu overlays Cilium legados e passou a forcar URLs internas via patch de ConfigMap para manter `adb-api-3` privado por vCluster. (`adb-api-3/k8s/base/kustomization.yaml`, `adb-api-3/k8s/base/networkpolicy-adb-api.yaml`, `adb-api-3/k8s/tenants/*/kustomization.yaml`, `adb-api-3/k8s/tenants/*/configmap-routing-patch.yaml`)
+- `adb-interpolation-api` foi ajustada para caminho OKE com Service `LoadBalancer` interno (NLB + NSG mode), remocao de Ingress no Kustomize e política de rede revisada para compartilhamento controlado. (`adb-interpolation-api/k8s/base/service.yaml`, `adb-interpolation-api/k8s/base/kustomization.yaml`, `adb-interpolation-api/k8s/base/networkpolicy.yaml`, `adb-interpolation-api/k8s/overlays/shared/kustomization.yaml`)
+- Automações `adb-k8s` passaram a tratar OKE como modo padrão (`PLATFORM_MODE=oke`), com desativação explícita de MetalLB/ingress-nginx no caminho OKE e atualização dos scripts de vCluster para remover geração de `sslip.io`, Ingress per-tenant e Cilium CRDs no overlay. (`env.sh`, `bin/40-metallb.sh`, `bin/50-ingress-nginx.sh`, `scripts/vcluster/common.sh`, `scripts/vcluster/create.sh`)
+- Argo CD, Observabilidade e Longhorn receberam defaults de exposição via LoadBalancer interno OKE (NLB/NSG), reduzindo dependência operacional de ingress-nginx para operações básicas de plataforma. (`bin/95-argocd.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`)
+- Criada pesquisa dedicada para substituicao de `ingress-nginx` no OKE, com comparativo entre opcao OKE-integrada (OCI Native Ingress), Gateway API e controladores viaveis, incluindo plano de migracao em fases e checklist de validacao. (`docs/oke-ingress-gateway-api-research.md`)
+- O indice de documentacao passou a destacar a urgencia da migracao de ingress no OKE e atualizou ordem de leitura e referencias externas para ingress/Gateway API. (`docs/README.md`)
+- O backlog de readiness elevou a migracao de ingress para bloqueador explicito de deploy confiavel, com preflight de visibilidade para recursos de edge. (`docs/oke-readiness-gaps.md`)
+- As decisoes de migracao reforcaram a prioridade de remover `ingress-nginx` e formalizaram a estrategia em duas fases (reducao de risco e consolidacao em Gateway API). (`docs/oke-migration-decisions.md`)
+- O checkpoint consolidado recebeu atualizacao de prioridade para ingress e o guia de testes passou a exigir validacao da estrategia de entrada escolhida para OKE. (`docs/checkpoints/2026-03-03.md`, `docs/testing-guidelines.md`)
+
+## 2026-03-13
+- Adicionado checkpoint consolidado da migração para OKE com status dos repositórios, branches ativas, bloqueio operacional do `kubectl` e próximos passos imediatos. (`docs/checkpoints/2026-03-03.md`)
+- Criado índice de documentação com referências cruzadas entre `adb-k8s`, `adb-api-3`, `adb-interpolation-api` e `infra-oci`, incluindo links externos da Oracle para Terraform/OCI API key. (`docs/README.md`)
+- Documentado o backlog de gaps para deploy em OKE (configuração, implementação, preflight, ordem de execução) e registrado que `kubectl` funciona via `mise exec -- kubectl`. (`docs/oke-readiness-gaps.md`, `docs/checkpoints/2026-03-03.md`)
+
 ## 2025-10-29
 - ADB API passou a aguardar o PostgreSQL ficar saudável antes de subir os pods; um Job dedicado executa o seed com o dialeto padrão do PostgreSQL e marca a conclusão para reinicializações futuras, mantendo o runtime em PostGIS. (`adb-api-3/k8s/base/job-adb-api-seed.yaml`, `adb-api-3/k8s/base/deployment-adb-api.yaml`)
 - O StatefulSet do PostgreSQL define `PGDATA` em um subdiretório, evitando novos `CrashLoopBackOff` em volumes Longhorn com `lost+found`. (`adb-api-3/k8s/base/statefulset-postgres.yaml`)

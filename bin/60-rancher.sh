@@ -6,6 +6,12 @@ source "$(dirname "$0")/lib.sh"
 STEP="rancher"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  log "PLATFORM_MODE=oke: etapa Rancher legada desabilitada neste fluxo."
+  ok "${STEP}"
+  exit 0
+fi
+
 require_commands kubectl
 ensure_helm
 : "${RANCHER_ADMIN_PASSWORD:?defina RANCHER_ADMIN_PASSWORD em secrets.env}"
