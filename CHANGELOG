@@ -1,6 +1,16 @@
 # Changelog
 
 ## 2026-03-18
+- Fase 3 iniciada: criado preflight operacional (`scripts/oke-preflight-check.sh`) com alvo `make preflight-oke` e fluxo agregado `make deploy-oke` para executar estágios OKE com gate inicial.
+- Estágios bare-metal `bin/10-so-requirements.sh`, `bin/20-kubeadm-init.sh`, `bin/30-cilium.sh` e `bin/35-join-workers.sh` agora fazem auto-skip em `PLATFORM_MODE=oke` para reduzir risco operacional.
+- Corrigida interpolação de variáveis no patch JSON do serviço Longhorn em OKE (anotações de LB agora aplicam valores reais de `LONGHORN_*`).
+- Runbook OKE recebeu seção de rollback por estágio e atalhos de operação/validação (`preflight`, `deploy`, `report-oke-exposure`).
+- Fase 2 da trilha OKE documentada com rastreamento de status por fases e auditoria completa de compatibilidade de scripts (`docs/oke-phases.md`, `docs/oke-script-audit.md`).
+- Adicionado relatório operacional de exposição (`scripts/oke-exposure-report.sh` + `make report-oke-exposure`) para identificar serviços internos/públicos e recursos de borda ativos.
+- Ajustado `bin/55-cert-manager.sh` para usar classe de ingress ACME compatível com modo OKE por padrão, evitando fallback fixo em `nginx`.
+- Criado runbook operacional OKE com passo a passo de execução, validação, exposição pública controlada e caminhos exatos no OCI Console (NSG, DNS, WAF, add-ons). (`docs/oke-operator-runbook.md`)
+- Script de validação de isolamento agora resolve kubeconfigs automaticamente por `VCLUSTER_TENANTS`/arquivos de estado e exibe diagnóstico quando `/var/opt/cluster-state` estiver vazio. (`scripts/validate-tenant-routing-isolation.sh`)
+- Exposição dos serviços de plataforma em OKE passou a aceitar toggles por variável de ambiente para interno/publico por componente (Argo CD, Grafana e Longhorn), mantendo defaults seguros internos. (`env.sh`, `bin/95-argocd.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`)
 - Adicionado script operacional de fácil acesso para validar isolamento entre tenants e roteamento compartilhado no OKE (`scripts/validate-tenant-routing-isolation.sh`), com alvo dedicado no Makefile (`make validate-tenant-routing`) e referências no README/guia de testes/readiness.
 - Fluxo de manifests multi-tenant foi endurecido para OKE: `adb-api-3` deixou de gerar Ingress por tenant, removeu overlays Cilium legados e passou a forcar URLs internas via patch de ConfigMap para manter `adb-api-3` privado por vCluster. (`adb-api-3/k8s/base/kustomization.yaml`, `adb-api-3/k8s/base/networkpolicy-adb-api.yaml`, `adb-api-3/k8s/tenants/*/kustomization.yaml`, `adb-api-3/k8s/tenants/*/configmap-routing-patch.yaml`)
 - `adb-interpolation-api` foi ajustada para caminho OKE com Service `LoadBalancer` interno (NLB + NSG mode), remocao de Ingress no Kustomize e política de rede revisada para compartilhamento controlado. (`adb-interpolation-api/k8s/base/service.yaml`, `adb-interpolation-api/k8s/base/kustomization.yaml`, `adb-interpolation-api/k8s/base/networkpolicy.yaml`, `adb-interpolation-api/k8s/overlays/shared/kustomization.yaml`)

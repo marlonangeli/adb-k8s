@@ -65,7 +65,13 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
    - acesso dos tenants à API compartilhada de interpolação.
 2. Para validação explícita de bloqueio cruzado, execute o mesmo script com URLs
    de teste (`--a-to-b-url` e `--b-to-a-url`) e confirme status de bloqueio.
-3. Como evidência complementar, verifique no Hubble UI fluxos negados ao tentar
+3. Gere o relatório de exposição para evidenciar quais serviços estão internos
+   ou públicos no momento do teste:
+   ```bash
+   cd /home/ilegna/Work/tcc/adb-k8s
+   make report-oke-exposure
+   ```
+4. Como evidência complementar, verifique no Hubble UI fluxos negados ao tentar
    acesso cruzado e anexe capturas no relatório.
 
 ## Sincronização GitOps

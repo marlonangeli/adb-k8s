@@ -2,6 +2,11 @@ SHELL := /bin/bash
 
 all: cert-manager observability longhorn vcluster argocd
 
+preflight-oke:
+	@scripts/oke-preflight-check.sh
+
+deploy-oke: preflight-oke cert-manager observability longhorn vcluster argocd
+
 so-requirements:
 	@bin/10-so-requirements.sh
 
@@ -40,3 +45,6 @@ argocd:
 
 validate-tenant-routing:
 	@scripts/validate-tenant-routing-isolation.sh
+
+report-oke-exposure:
+	@scripts/oke-exposure-report.sh

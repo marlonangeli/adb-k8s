@@ -2,6 +2,13 @@
 set -Eeuo pipefail
 
 source "$(dirname "$0")/lib.sh"
+
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  log "PLATFORM_MODE=oke: etapa bare-metal desabilitada (35-join-workers)."
+  ok "join-workers"
+  exit 0
+fi
+
 need_root
 
 STEP="join-workers"

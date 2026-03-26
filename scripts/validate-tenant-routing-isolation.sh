@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
-
 STATE_DIR="${STATE_DIR:-/var/opt/cluster-state}"
-TENANT_A_KUBECONFIG="${TENANT_A_KUBECONFIG:-${STATE_DIR}/kubeconfig-abc.yaml}"
-TENANT_B_KUBECONFIG="${TENANT_B_KUBECONFIG:-${STATE_DIR}/kubeconfig-xyz.yaml}"
+TENANT_A_KUBECONFIG="${TENANT_A_KUBECONFIG:-}"
+TENANT_B_KUBECONFIG="${TENANT_B_KUBECONFIG:-}"
 SHARED_KUBECONFIG="${SHARED_KUBECONFIG:-${STATE_DIR}/kubeconfig-shared.yaml}"
+TENANT_A_NAME="${TENANT_A_NAME:-}"
+TENANT_B_NAME="${TENANT_B_NAME:-}"
 
 TENANT_NS="${TENANT_NS:-app}"
 SHARED_NS="${SHARED_NS:-processing}"
@@ -32,8 +31,10 @@ Usage:
   validate-tenant-routing-isolation.sh [options]
 
 Options:
-  --tenant-a-kubeconfig <path>   Default: /var/opt/cluster-state/kubeconfig-abc.yaml
-  --tenant-b-kubeconfig <path>   Default: /var/opt/cluster-state/kubeconfig-xyz.yaml
+  --tenant-a-name <name>         Optional tenant name to resolve kubeconfig path
+  --tenant-b-name <name>         Optional tenant name to resolve kubeconfig path
+  --tenant-a-kubeconfig <path>   Auto-resolved from VCLUSTER_TENANTS or kubeconfig files
+  --tenant-b-kubeconfig <path>   Auto-resolved from VCLUSTER_TENANTS or kubeconfig files
   --shared-kubeconfig <path>     Default: /var/opt/cluster-state/kubeconfig-shared.yaml
   --tenant-namespace <name>      Default: app
   --shared-namespace <name>      Default: processing
@@ -46,6 +47,8 @@ Examples:
   scripts/validate-tenant-routing-isolation.sh
 
   scripts/validate-tenant-routing-isolation.sh \
+    --tenant-a-name tenant-a \
+    --tenant-b-name tenant-b \
     --a-to-b-url "http://tenant-b.internal/actuator/health/readiness" \
     --b-to-a-url "http://tenant-a.internal/actuator/health/readiness"
 EOF
@@ -53,6 +56,10 @@ EOF
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --tenant-a-name)
+      TENANT_A_NAME="$2"; shift 2 ;;
+    --tenant-b-name)
+      TENANT_B_NAME="$2"; shift 2 ;;
     --tenant-a-kubeconfig)
       TENANT_A_KUBECONFIG="$2"; shift 2 ;;
     --tenant-b-kubeconfig)
@@ -84,6 +91,65 @@ if [[ -f "${STATE_DIR}/dynamic.env" ]]; then
   source "${STATE_DIR}/dynamic.env" || true
 fi
 
+discover_default_tenants() {
+  local -a tenant_names=()
+  local kubeconfig_path tenant_name
+
+  if [[ -n "${VCLUSTER_TENANTS:-}" ]]; then
+    IFS=' ' read -r -a tenant_names <<<"${VCLUSTER_TENANTS}"
+  fi
+
+  if ((${#tenant_names[@]} == 0)); then
+    for kubeconfig_path in "${STATE_DIR}"/kubeconfig-*.yaml; do
+      [[ -e "${kubeconfig_path}" ]] || continue
+      tenant_name="${kubeconfig_path##*/kubeconfig-}"
+      tenant_name="${tenant_name%.yaml}"
+      [[ "${tenant_name}" == "shared" ]] && continue
+      tenant_names+=("${tenant_name}")
+    done
+  fi
+
+  if [[ -z "${TENANT_A_NAME}" && ${#tenant_names[@]} -ge 1 ]]; then
+    TENANT_A_NAME="${tenant_names[0]}"
+  fi
+  if [[ -z "${TENANT_B_NAME}" && ${#tenant_names[@]} -ge 2 ]]; then
+    TENANT_B_NAME="${tenant_names[1]}"
+  fi
+}
+
+resolve_default_kubeconfigs() {
+  if [[ -z "${TENANT_A_KUBECONFIG}" ]]; then
+    if [[ -n "${TENANT_A_NAME}" ]]; then
+      TENANT_A_KUBECONFIG="${STATE_DIR}/kubeconfig-${TENANT_A_NAME}.yaml"
+    else
+      TENANT_A_KUBECONFIG="${STATE_DIR}/kubeconfig-tenant-a.yaml"
+    fi
+  fi
+
+  if [[ -z "${TENANT_B_KUBECONFIG}" ]]; then
+    if [[ -n "${TENANT_B_NAME}" ]]; then
+      TENANT_B_KUBECONFIG="${STATE_DIR}/kubeconfig-${TENANT_B_NAME}.yaml"
+    else
+      TENANT_B_KUBECONFIG="${STATE_DIR}/kubeconfig-tenant-b.yaml"
+    fi
+  fi
+}
+
+show_available_kubeconfigs() {
+  local kubeconfig_path found=0
+  for kubeconfig_path in "${STATE_DIR}"/kubeconfig-*.yaml; do
+    [[ -e "${kubeconfig_path}" ]] || continue
+    printf '  - %s\n' "${kubeconfig_path}"
+    found=1
+  done
+  if (( found == 0 )); then
+    printf '  (none found in %s)\n' "${STATE_DIR}"
+  fi
+}
+
+discover_default_tenants
+resolve_default_kubeconfigs
+
 if [[ -n "${VCLUSTER_SHARED_INTERPOLATION_HOST:-}" ]]; then
   SHARED_INTERPOLATION_URL="http://${VCLUSTER_SHARED_INTERPOLATION_HOST}${INTERPOLATION_HEALTH_PATH}"
 else
@@ -114,6 +180,9 @@ require_file() {
   local file_path="$1"
   if [[ ! -f "${file_path}" ]]; then
     echo "ERROR: kubeconfig not found: ${file_path}" >&2
+    echo "Available kubeconfig files:" >&2
+    show_available_kubeconfigs >&2
+    echo "Hint: use --tenant-a-kubeconfig/--tenant-b-kubeconfig options if your names differ." >&2
     exit 1
   fi
 }

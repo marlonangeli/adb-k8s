@@ -3,6 +3,12 @@ set -Eeuo pipefail
 
 source "$(dirname "$0")/lib.sh"
 
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  log "PLATFORM_MODE=oke: etapa bare-metal desabilitada (30-cilium)."
+  ok "cilium"
+  exit 0
+fi
+
 STEP="cilium"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 

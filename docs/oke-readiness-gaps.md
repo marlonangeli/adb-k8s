@@ -6,6 +6,7 @@ This document tracks what is still missing to configure and implement before a r
 
 - Repositories and target branches are aligned (`adb-k8s: oke`, `infra-oci: adb`, `adb-api-3: multi-tenant`, `adb-interpolation-api: kubernetes`).
 - OKE migration direction is defined in `docs/oke-migration-decisions.md`.
+- Canonical operator execution guide is `docs/oke-operator-runbook.md`.
 - `kubectl` access works through mise execution:
   - `mise exec -- kubectl`
 - Migration is still partial and should not be treated as production-ready yet.
@@ -76,6 +77,10 @@ mise exec -- kubectl config current-context
 mise exec -- kubectl get nodes -o wide
 mise exec -- kubectl get pods -A
 
+# OKE preflight baseline
+cd /home/ilegna/Work/tcc/adb-k8s
+scripts/oke-preflight-check.sh
+
 # Edge migration visibility
 mise exec -- kubectl get ingressclass
 mise exec -- kubectl get ingress -A
@@ -96,8 +101,10 @@ cd /home/ilegna/Work/tcc/adb-interpolation-api
 mise exec -- kubectl kustomize k8s/overlays/shared >/dev/null
 
 # Tenant isolation baseline
-cd /home/ilegna/Work/tcc/adb-k8s
 scripts/validate-tenant-routing-isolation.sh
+
+# Exposure visibility baseline
+scripts/oke-exposure-report.sh
 ```
 
 ## Deployment order
@@ -117,3 +124,4 @@ scripts/validate-tenant-routing-isolation.sh
 - `ingress-nginx` is removed from the OKE deployment path and replacement ingress or gateway flow is validated.
 - Shared and tenant services deploy successfully and pass smoke checks.
 - Multi-tenant isolation checks pass (including `scripts/validate-tenant-routing-isolation.sh`).
+- Exposure report confirms intended internal/public boundary (`scripts/oke-exposure-report.sh`).

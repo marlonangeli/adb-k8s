@@ -109,9 +109,9 @@ helm_args=(
 if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
   helm_args+=(--set grafana.ingress.enabled=false)
   helm_args+=(--set grafana.service.type=LoadBalancer)
-  helm_args+=(--set grafana.service.annotations.oci\.oraclecloud\.com/load-balancer-type=nlb)
-  helm_args+=(--set-string grafana.service.annotations.oci-network-load-balancer\.oraclecloud\.com/internal=true)
-  helm_args+=(--set-string grafana.service.annotations.oci\.oraclecloud\.com/security-rule-management-mode=NSG)
+  helm_args+=(--set grafana.service.annotations.oci\.oraclecloud\.com/load-balancer-type="${GRAFANA_LB_TYPE}")
+  helm_args+=(--set-string grafana.service.annotations.oci-network-load-balancer\.oraclecloud\.com/internal="${GRAFANA_LB_INTERNAL}")
+  helm_args+=(--set-string grafana.service.annotations.oci\.oraclecloud\.com/security-rule-management-mode="${GRAFANA_LB_SECURITY_RULE_MODE}")
 else
   helm_args+=(--set grafana.ingress.enabled=true)
   helm_args+=(--set grafana.ingress.ingressClassName=nginx)
@@ -123,7 +123,7 @@ if [[ "${TLS_ENABLED:-0}" == "1" && "${PLATFORM_MODE:-baremetal}" != "oke" ]]; t
   helm_args+=(--set grafana.ingress.tls[0].hosts[0]="${GRAFANA_HOSTNAME}")
   helm_args+=(--set grafana.ingress.tls[0].hosts[1]="${GRAFANA_LOCAL_HOSTNAME}")
   helm_args+=(--set grafana.ingress.tls[0].secretName="grafana-tls")
-else
+elif [[ "${PLATFORM_MODE:-baremetal}" != "oke" ]]; then
   helm_args+=(--set-string grafana.ingress.annotations.nginx\\.ingress\\.kubernetes\\.io/ssl-redirect=false)
 fi
 
@@ -158,12 +158,16 @@ save_state_var "GRAFANA_HOSTNAME" "${GRAFANA_HOSTNAME}"
 save_state_var "GRAFANA_LOCAL_HOSTNAME" "${GRAFANA_LOCAL_HOSTNAME}"
 
 if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  grafana_exposure_label="publico"
+  if [[ "${GRAFANA_LB_INTERNAL}" == "true" ]]; then
+    grafana_exposure_label="interno"
+  fi
   grafana_endpoint="$(wait_for_lb_ip monitoring kube-prometheus-stack-grafana 300 || true)"
   if [[ -n "${grafana_endpoint}" ]]; then
     save_state_var "GRAFANA_HOSTNAME" "${grafana_endpoint}"
-    log "Grafana disponível em http://${grafana_endpoint} (LoadBalancer interno OKE)."
+    log "Grafana disponível em http://${grafana_endpoint} (LoadBalancer ${grafana_exposure_label} OKE)."
   else
-    log "Grafana instalado; endpoint LoadBalancer interno não disponível no tempo esperado."
+    log "Grafana instalado; endpoint LoadBalancer OKE não disponível no tempo esperado."
   fi
 elif [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   log "Grafana disponível em https://${GRAFANA_HOSTNAME} e https://${GRAFANA_LOCAL_HOSTNAME}"

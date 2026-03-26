@@ -22,6 +22,11 @@ This file centralizes project references used in the TCC migration from bare-met
 - `README.md`: bare-metal platform overview, provisioning flow, topology and operations.
 - `CHANGELOG`: timeline of operational and architectural changes.
 - `scripts/validate-tenant-routing-isolation.sh`: operational validation script for tenant isolation and shared interpolation routing on OKE.
+- `scripts/oke-preflight-check.sh`: preflight checker before running OKE stages.
+- `scripts/oke-exposure-report.sh`: reports current internal/public exposure for LB/Ingress/Gateway resources.
+- `docs/oke-operator-runbook.md`: step-by-step operator runbook for OKE execution, validation, public exposure, and OCI Console paths.
+- `docs/oke-phases.md`: phase tracker for OKE migration execution and hardening.
+- `docs/oke-script-audit.md`: script-by-script OKE compatibility status and remediation notes.
 - `docs/oke-ingress-gateway-api-research.md`: deep research and recommendation for replacing `ingress-nginx` on OKE with OKE-integrated alternatives and Gateway API paths.
 - `docs/oke-migration-decisions.md`: target decisions to adapt the stack to OKE.
 - `docs/oke-readiness-gaps.md`: missing configuration and implementation items before reliable OKE deployment.
@@ -48,9 +53,12 @@ This file centralizes project references used in the TCC migration from bare-met
 
 ## Suggested reading order
 
-1. Read `docs/oke-ingress-gateway-api-research.md` for ingress replacement priority and options.
-2. Read `docs/oke-readiness-gaps.md` for updated blockers and execution gates.
-3. Read `docs/checkpoints/2026-03-03.md` for migration context and timeline.
-4. Read `docs/oke-migration-decisions.md` for target architecture decisions.
-5. Read `infra-oci/oracle-cloud/kubernetes/README.md` in `infra-oci` before running Terraform/OpenTofu.
-6. Read `adb-api-3/docs/multi-tenant-summary.md` and `adb-interpolation-api/README.md` to align app deployment expectations.
+1. Read `docs/oke-phases.md` for current execution status by phase.
+2. Read `docs/oke-operator-runbook.md` for exact execution steps and OCI Console configuration paths.
+3. Read `docs/oke-script-audit.md` for script compatibility map and constraints.
+4. Read `docs/oke-ingress-gateway-api-research.md` for ingress replacement priority and options.
+5. Read `docs/oke-readiness-gaps.md` for updated blockers and execution gates.
+6. Read `docs/checkpoints/2026-03-03.md` for migration context and timeline.
+7. Read `docs/oke-migration-decisions.md` for target architecture decisions.
+8. Read `infra-oci/oracle-cloud/kubernetes/README.md` in `infra-oci` before running Terraform/OpenTofu.
+9. Read `adb-api-3/docs/multi-tenant-summary.md` and `adb-interpolation-api/README.md` to align app deployment expectations.

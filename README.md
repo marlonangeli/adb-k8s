@@ -1,6 +1,11 @@
-## Plataforma K8s Bare-Metal
+## Plataforma K8s (OKE + legado bare-metal)
 
 > Ambiente alvo: **Debian 12**, acesso SSH permitido **apenas** para `utfpr`. Conecte via `ssh utfpr@200.134.18.55 -p 22252`, em cada nó execute `su -` e só então rode os scripts como root.
+
+## OKE quick start (current path)
+
+- For Oracle OKE operation, use `docs/oke-operator-runbook.md` as the canonical guide.
+- That runbook contains: exact script order, validation gates, OCI Console paths (NSG/DNS/WAF), and controlled public exposure steps.
 
 ### Visão Geral
 
@@ -68,6 +73,7 @@
 
 ### Fluxo rápido
 
+0. `make preflight-oke` para validar contexto OKE e estado local antes de executar estágios.
 1. `bin/10-so-requirements.sh` (pode usar `bin/run-on-nodes.sh ... --all`).
 2. `bin/20-kubeadm-init.sh` no control-plane (guarde o `~/join-worker.sh`).
 3. `bin/30-cilium.sh` para rede/Hubble.
@@ -76,6 +82,8 @@
 6. `bin/55-cert-manager.sh` apenas se `TLS_ENABLED=1`.
 7. `bin/60-rancher.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`, `bin/90-vcluster.sh`.
 8. `bin/95-argocd.sh` para instalar o Argo CD, registrar os vClusters e criar as Applications GitOps.
+
+> Para o caminho OKE, use `make deploy-oke` e siga `docs/oke-operator-runbook.md`.
 
 ### Provisionamento de novos tenants
 
@@ -93,6 +101,7 @@
 ### Testes e observabilidade
 
 - Execute `scripts/validate-tenant-routing-isolation.sh` (ou `make validate-tenant-routing`) para validar rapidamente o baseline de isolamento no OKE: API privada por tenant, sem Ingress da API de dados e acesso compartilhado à interpolação.
+- Execute `scripts/oke-exposure-report.sh` (ou `make report-oke-exposure`) para listar quais serviços `LoadBalancer` estão internos/públicos e revisar recursos de borda.
 - Utilize os scripts `tests/k6/*.js` como base para smoke, ramp-up e validação da API compartilhada; exporte os resultados (`--out json=...`) e registre no TCC.
 - Após cada execução, configure o Grafana (dados de Kubernetes) e o Hubble com os kubeconfigs exportados para coletar métricas e fluxos.
 - Consulte `docs/testing-guidelines.md` para um roteiro completo cobrindo uso de recursos, escalabilidade, segurança, GitOps e a avaliação do Liqo como trabalho futuro.

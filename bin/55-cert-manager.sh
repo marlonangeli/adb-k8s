@@ -74,7 +74,13 @@ EOF
 if [[ -n "${CERT_MANAGER_ACME_EMAIL:-}" ]]; then
   ACME_ISSUER_NAME="${CERT_MANAGER_ACME_ISSUER_NAME:-letsencrypt-prod}"
   ACME_SERVER="${CERT_MANAGER_ACME_SERVER:-https://acme-v02.api.letsencrypt.org/directory}"
-  ACME_INGRESS_CLASS="${CERT_MANAGER_ACME_INGRESS_CLASS:-nginx}"
+  if [[ -n "${CERT_MANAGER_ACME_INGRESS_CLASS:-}" ]]; then
+    ACME_INGRESS_CLASS="${CERT_MANAGER_ACME_INGRESS_CLASS}"
+  elif [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+    ACME_INGRESS_CLASS="${VCLUSTER_INGRESS_CLASS:-native-oci}"
+  else
+    ACME_INGRESS_CLASS="nginx"
+  fi
 
   kubectl apply -f - <<EOF
 apiVersion: cert-manager.io/v1

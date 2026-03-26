@@ -71,24 +71,32 @@ save_state_var "LONGHORN_HOSTNAME" "${LONGHORN_HOSTNAME}"
 save_state_var "LONGHORN_LOCAL_HOSTNAME" "${LONGHORN_LOCAL_HOSTNAME}"
 
 if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
-  kubectl -n longhorn-system patch svc longhorn-frontend --type merge -p '{
-    "spec": {
-      "type": "LoadBalancer"
-    },
-    "metadata": {
-      "annotations": {
-        "oci.oraclecloud.com/load-balancer-type": "nlb",
-        "oci-network-load-balancer.oraclecloud.com/internal": "true",
-        "oci.oraclecloud.com/security-rule-management-mode": "NSG"
-      }
+  longhorn_exposure_label="publico"
+  if [[ "${LONGHORN_LB_INTERNAL}" == "true" ]]; then
+    longhorn_exposure_label="interno"
+  fi
+  longhorn_patch_payload=$(cat <<EOF
+{
+  "spec": {
+    "type": "LoadBalancer"
+  },
+  "metadata": {
+    "annotations": {
+      "oci.oraclecloud.com/load-balancer-type": "${LONGHORN_LB_TYPE}",
+      "oci-network-load-balancer.oraclecloud.com/internal": "${LONGHORN_LB_INTERNAL}",
+      "oci.oraclecloud.com/security-rule-management-mode": "${LONGHORN_LB_SECURITY_RULE_MODE}"
     }
-  }'
+  }
+}
+EOF
+)
+  kubectl -n longhorn-system patch svc longhorn-frontend --type merge -p "${longhorn_patch_payload}"
   longhorn_endpoint="$(wait_for_lb_ip longhorn-system longhorn-frontend 300 || true)"
   if [[ -n "${longhorn_endpoint}" ]]; then
     save_state_var "LONGHORN_HOSTNAME" "${longhorn_endpoint}"
-    log "Longhorn UI disponível em http://${longhorn_endpoint} (LoadBalancer interno OKE)."
+    log "Longhorn UI disponível em http://${longhorn_endpoint} (LoadBalancer ${longhorn_exposure_label} OKE)."
   else
-    log "Longhorn instalado; endpoint LoadBalancer interno não disponível no tempo esperado."
+    log "Longhorn instalado; endpoint LoadBalancer OKE não disponível no tempo esperado."
   fi
   ok "${STEP}"
   exit 0

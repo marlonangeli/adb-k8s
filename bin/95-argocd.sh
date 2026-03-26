@@ -27,9 +27,9 @@ server:
   service:
     type: LoadBalancer
     annotations:
-      oci.oraclecloud.com/load-balancer-type: "nlb"
-      oci-network-load-balancer.oraclecloud.com/internal: "true"
-      oci.oraclecloud.com/security-rule-management-mode: "NSG"
+      oci.oraclecloud.com/load-balancer-type: "${ARGOCD_LB_TYPE}"
+      oci-network-load-balancer.oraclecloud.com/internal: "${ARGOCD_LB_INTERNAL}"
+      oci.oraclecloud.com/security-rule-management-mode: "${ARGOCD_LB_SECURITY_RULE_MODE}"
 configs:
   cm:
     timeout.reconciliation: 30s
@@ -60,8 +60,12 @@ if [[ -z "${ARGOCD_ENDPOINT}" ]]; then
   ARGOCD_ENDPOINT="$(wait_for_lb_ip "${ARGOCD_NAMESPACE}" argocd-server 300 || true)"
 fi
 if [[ -n "${ARGOCD_ENDPOINT}" ]]; then
+  argocd_exposure_label="publico"
+  if [[ "${ARGOCD_LB_INTERNAL}" == "true" ]]; then
+    argocd_exposure_label="interno"
+  fi
   save_state_var "ARGOCD_HOSTNAME" "${ARGOCD_ENDPOINT}"
-  log "Argo CD disponível via http://${ARGOCD_ENDPOINT} (TLS desabilitado por padrão)."
+  log "Argo CD disponível via http://${ARGOCD_ENDPOINT} (LoadBalancer ${argocd_exposure_label}, TLS desabilitado por padrão)."
 else
   log "Argo CD instalado, mas não foi possível descobrir endpoint LoadBalancer automaticamente."
 fi
