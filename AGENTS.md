@@ -29,7 +29,7 @@
 ## Security & Configuration Tips
 - Never commit real credentials; keep sensitive data in `secrets.env`, which is git-ignored.
 - Scripts assume login as `utfpr` followed by `su -`; ensure you can escalate before running automation remotely.
-- Persisted state lives in `/var/opt/cluster-state`; inspect markers (`*.ok`) before forcing reruns. Delete intentionally only when re-provisioning from scratch.
+- Persisted state lives in `${STATE_DIR}` (default: `<repo>/.state/cluster-state`); inspect markers (`*.ok`) before forcing reruns. Delete intentionally only when re-provisioning from scratch.
 
 ## Review Checklist
 - Confirme se o `CHANGELOG` foi atualizado com as mudanças relevantes antes de concluir uma entrega.

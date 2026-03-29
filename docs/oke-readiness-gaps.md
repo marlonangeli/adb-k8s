@@ -81,6 +81,11 @@ mise exec -- kubectl get pods -A
 cd /home/ilegna/Work/tcc/adb-k8s
 scripts/oke-preflight-check.sh
 
+# Optional: use local writable runtime paths when /var/* is restricted
+export STATE_DIR="$PWD/.state/cluster-state"
+export LOG_FILE="$PWD/.state/cluster-install.log"
+scripts/oke-preflight-check.sh
+
 # Edge migration visibility
 mise exec -- kubectl get ingressclass
 mise exec -- kubectl get ingress -A

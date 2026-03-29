@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-STATE_DIR="${STATE_DIR:-/var/opt/cluster-state}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+STATE_DIR="${STATE_DIR:-${ROOT_DIR}/.state/cluster-state}"
 TENANT_A_KUBECONFIG="${TENANT_A_KUBECONFIG:-}"
 TENANT_B_KUBECONFIG="${TENANT_B_KUBECONFIG:-}"
 SHARED_KUBECONFIG="${SHARED_KUBECONFIG:-${STATE_DIR}/kubeconfig-shared.yaml}"
@@ -35,7 +38,7 @@ Options:
   --tenant-b-name <name>         Optional tenant name to resolve kubeconfig path
   --tenant-a-kubeconfig <path>   Auto-resolved from VCLUSTER_TENANTS or kubeconfig files
   --tenant-b-kubeconfig <path>   Auto-resolved from VCLUSTER_TENANTS or kubeconfig files
-  --shared-kubeconfig <path>     Default: /var/opt/cluster-state/kubeconfig-shared.yaml
+  --shared-kubeconfig <path>     Default: <repo>/.state/cluster-state/kubeconfig-shared.yaml
   --tenant-namespace <name>      Default: app
   --shared-namespace <name>      Default: processing
   --timeout-seconds <n>          Curl max/connect timeout (default: 10)

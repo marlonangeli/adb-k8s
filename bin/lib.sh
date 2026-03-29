@@ -12,8 +12,29 @@ if [[ ! -f "${SECRETS_FILE}" ]]; then
 fi
 source "${SECRETS_FILE}"
 
-mkdir -p "${STATE_DIR}"
-touch "${LOG_FILE}"
+ensure_runtime_paths() {
+  local log_dir
+  if ! mkdir -p "${STATE_DIR}" 2>/dev/null; then
+    echo "não foi possível criar STATE_DIR=${STATE_DIR}. Ajuste permissões ou defina STATE_DIR em caminho gravável." >&2
+    exit 1
+  fi
+  if [[ ! -w "${STATE_DIR}" ]]; then
+    echo "STATE_DIR sem permissão de escrita: ${STATE_DIR}" >&2
+    exit 1
+  fi
+
+  log_dir="$(dirname "${LOG_FILE}")"
+  if ! mkdir -p "${log_dir}" 2>/dev/null; then
+    echo "não foi possível criar diretório de LOG_FILE (${log_dir}). Ajuste permissões ou defina LOG_FILE em caminho gravável." >&2
+    exit 1
+  fi
+  if ! touch "${LOG_FILE}" 2>/dev/null; then
+    echo "não foi possível escrever em LOG_FILE=${LOG_FILE}. Ajuste permissões ou use LOG_FILE em caminho gravável." >&2
+    exit 1
+  fi
+}
+
+ensure_runtime_paths
 
 DYNAMIC_ENV="${STATE_DIR}/dynamic.env"
 
@@ -248,19 +269,40 @@ wait_for_lb_ip() {
   done
 }
 
+binary_install_dir() {
+  local system_dir="/usr/local/bin"
+  local user_dir="${HOME}/.local/bin"
+
+  if [[ -d "${system_dir}" && -w "${system_dir}" ]]; then
+    printf '%s\n' "${system_dir}"
+    return
+  fi
+
+  mkdir -p "${user_dir}"
+  if [[ ":${PATH}:" != *":${user_dir}:"* ]]; then
+    export PATH="${user_dir}:${PATH}"
+  fi
+  printf '%s\n' "${user_dir}"
+}
+
 ensure_helm() {
   if command -v helm >/dev/null 2>&1; then
     return
   fi
   require_commands curl tar install
-  local version tmp_dir archive
+  local version tmp_dir archive install_dir target
   version=$(curl -s https://get.helm.sh/helm-latest-version)
   tmp_dir=$(mktemp -d)
   register_tmp "${tmp_dir}"
   archive="${tmp_dir}/helm.tar.gz"
+  install_dir=$(binary_install_dir)
+  target="${install_dir}/helm"
   curl -sSL "https://get.helm.sh/helm-${version}-linux-amd64.tar.gz" -o "${archive}"
   tar -C "${tmp_dir}" -xzf "${archive}"
-  install -m 0755 "${tmp_dir}/linux-amd64/helm" /usr/local/bin/helm
+  install -m 0755 "${tmp_dir}/linux-amd64/helm" "${target}"
+  if [[ "${install_dir}" != "/usr/local/bin" ]]; then
+    log "helm instalado em ${target}; mantenha ${install_dir} no PATH em novos terminais."
+  fi
 }
 
 ensure_cilium_cli() {
@@ -268,17 +310,22 @@ ensure_cilium_cli() {
     return
   fi
   require_commands curl tar sha256sum install
-  local version tmp_dir archive checksum
+  local version tmp_dir archive checksum install_dir target
   version=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
   tmp_dir=$(mktemp -d)
   register_tmp "${tmp_dir}"
   archive="${tmp_dir}/cilium-linux-amd64.tar.gz"
   checksum="${archive}.sha256sum"
+  install_dir=$(binary_install_dir)
+  target="${install_dir}/cilium"
   curl -sSL "https://github.com/cilium/cilium-cli/releases/download/${version}/cilium-linux-amd64.tar.gz" -o "${archive}"
   curl -sSL "https://github.com/cilium/cilium-cli/releases/download/${version}/cilium-linux-amd64.tar.gz.sha256sum" -o "${checksum}"
   (cd "${tmp_dir}" && sha256sum --check "$(basename "${checksum}")")
   tar -C "${tmp_dir}" -xzf "${archive}"
-  install -m 0755 "${tmp_dir}/cilium" /usr/local/bin/cilium
+  install -m 0755 "${tmp_dir}/cilium" "${target}"
+  if [[ "${install_dir}" != "/usr/local/bin" ]]; then
+    log "cilium instalado em ${target}; mantenha ${install_dir} no PATH em novos terminais."
+  fi
 }
 
 ensure_vcluster_cli() {
@@ -286,12 +333,17 @@ ensure_vcluster_cli() {
     return
   fi
   require_commands curl install
-  local tmp_dir binary
+  local tmp_dir binary install_dir target
   tmp_dir=$(mktemp -d)
   register_tmp "${tmp_dir}"
   binary="${tmp_dir}/vcluster"
+  install_dir=$(binary_install_dir)
+  target="${install_dir}/vcluster"
   curl -sSL "https://github.com/loft-sh/vcluster/releases/latest/download/vcluster-linux-amd64" -o "${binary}"
-  install -m 0755 "${binary}" /usr/local/bin/vcluster
+  install -m 0755 "${binary}" "${target}"
+  if [[ "${install_dir}" != "/usr/local/bin" ]]; then
+    log "vcluster instalado em ${target}; mantenha ${install_dir} no PATH em novos terminais."
+  fi
 }
 
 ssh_options() {

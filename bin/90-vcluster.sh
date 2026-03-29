@@ -6,6 +6,8 @@ source "$(dirname "$0")/lib.sh"
 STEP="vcluster"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+VC_MANUAL_EXECUTION="${VC_MANUAL_EXECUTION:-1}"
+
 require_commands kubectl envsubst
 source "${ROOT_DIR}/scripts/vcluster/common.sh"
 
@@ -15,6 +17,13 @@ INGRESS_IP="${VC_INGRESS_IP}"
 prompt_manual_execution() {
   local message="$1"; shift
   local -a cmd=("$@")
+
+  if [[ "${VC_MANUAL_EXECUTION}" == "0" ]]; then
+    log "${message} Execução automática habilitada (VC_MANUAL_EXECUTION=0)."
+    "${cmd[@]}"
+    return
+  fi
+
   log "${message}"
   printf '  '
   local token
@@ -22,6 +31,12 @@ prompt_manual_execution() {
     printf '%q ' "${token}"
   done
   printf '\n'
+
+  if [[ ! -t 0 ]]; then
+    log "terminal não interativo: execute o comando manualmente e rode novamente, ou use VC_MANUAL_EXECUTION=0 para execução automática."
+    return 1
+  fi
+
   read -rp $'Execute o comando acima em outro terminal e pressione ENTER para continuar...\n> ' _
 }
 
@@ -70,7 +85,12 @@ for tenant in "${TENANT_IDS[@]}"; do
     --profile private
     --state-key "${state_key}"
   )
-  prompt_manual_execution "Execução manual necessária para o vcluster ${cluster}." "${create_cmd[@]}"
+  if ! prompt_manual_execution "Execução manual necessária para o vcluster ${cluster}." "${create_cmd[@]}"; then
+    save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+    vc::clear_cluster_checkpoint "${cluster}"
+    log "não foi possível concluir a etapa manual do vcluster ${cluster}."
+    exit 1
+  fi
   if [[ ! -f "${kubeconfig_path}" ]]; then
     save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
     vc::clear_cluster_checkpoint "${cluster}"
@@ -129,7 +149,12 @@ if [[ "${ENABLE_SHARED_VCLUSTER}" == "1" ]]; then
         --profile shared
         --state-key "${state_key}"
       )
-      prompt_manual_execution "Execução manual necessária para o vcluster compartilhado ${cluster}." "${shared_cmd[@]}"
+      if ! prompt_manual_execution "Execução manual necessária para o vcluster compartilhado ${cluster}." "${shared_cmd[@]}"; then
+        save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+        vc::clear_cluster_checkpoint "${cluster}"
+        log "não foi possível concluir a etapa manual do vcluster compartilhado ${cluster}."
+        exit 1
+      fi
       if [[ ! -f "${kubeconfig_path}" ]]; then
         save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
         vc::clear_cluster_checkpoint "${cluster}"

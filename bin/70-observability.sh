@@ -51,21 +51,84 @@ if [[ ! -d "${chart_dir}" ]]; then
 fi
 chart_source="${chart_dir}"
 
+crd_dir="${chart_dir}/crds"
+declare -a crd_files=()
+if [[ -d "${crd_dir}" ]]; then
+  shopt -s nullglob
+  crd_files=("${crd_dir}"/*.yaml "${crd_dir}"/*.yml)
+  shopt -u nullglob
+  if ((${#crd_files[@]} > 0)); then
+    mapfile -t crd_files < <(printf '%s\n' "${crd_files[@]}" | sort -u)
+  fi
+fi
+
+CRD_APPLY_MAX_RETRIES="${CRD_APPLY_MAX_RETRIES:-5}"
+
+apply_crd_manifest_with_retry() {
+  local label="$1"
+  local manifest_file="$2"
+  local attempt=1
+  local output
+
+  while (( attempt <= CRD_APPLY_MAX_RETRIES )); do
+    if output=$(kubectl apply --server-side --force-conflicts -f "${manifest_file}" 2>&1); then
+      printf '%s\n' "${output}"
+      return 0
+    fi
+
+    log "falha ao aplicar ${label} (tentativa ${attempt}/${CRD_APPLY_MAX_RETRIES})"
+    printf '%s\n' "${output}"
+
+    if [[ "${output}" == *"metadata.annotations: Too long"* ]]; then
+      log "erro de tamanho de anotação detectado ao aplicar ${label}; abortando para evitar loop infinito."
+      return 1
+    fi
+
+    ((attempt++))
+    sleep 5
+  done
+
+  log "atingido limite de tentativas para ${label}."
+  return 1
+}
+
 if ! kubectl get crd prometheuses.monitoring.coreos.com >/dev/null 2>&1; then
   log "Aplicando CRDs do kube-prometheus-stack de forma controlada"
-  for crd_file in "${chart_dir}"/crds/*.yaml; do
-    crd_name=$(awk '/^  name: /{print $2; exit}' "${crd_file}")
-    if [[ -z "${crd_name}" ]]; then
-      crd_name=$(basename "${crd_file}" .yaml)
+  if ((${#crd_files[@]} == 0)); then
+    crd_fallback_file="${chart_tmp}/kube-prometheus-stack-crds.yaml"
+    helm show crds "${chart_source}" >"${crd_fallback_file}" || true
+    if [[ ! -s "${crd_fallback_file}" ]]; then
+      log "nenhum arquivo CRD encontrado em ${crd_dir} e fallback 'helm show crds' retornou vazio."
+      log "verifique versão do chart/repositório antes de continuar."
+      exit 1
     fi
-    log "Aplicando CRD ${crd_name}"
-    until kubectl apply -f "${crd_file}"; do
-      log "falha ao aplicar ${crd_name}, tentando novamente em 5s"
-      sleep 5
+
+    log "diretório de CRDs vazio; aplicando fallback via 'helm show crds'."
+    if ! apply_crd_manifest_with_retry "CRDs via fallback" "${crd_fallback_file}"; then
+      log "falha ao aplicar CRDs via fallback; interrompendo etapa observability."
+      exit 1
+    fi
+
+    mapfile -t fallback_crd_names < <(awk '/^  name: /{print $2}' "${crd_fallback_file}" | sort -u)
+    for crd_name in "${fallback_crd_names[@]}"; do
+      [[ -n "${crd_name}" ]] || continue
+      kubectl wait --for=condition=Established --timeout=120s "crd/${crd_name}" >/dev/null 2>&1 || true
     done
-    kubectl wait --for=condition=Established --timeout=120s "crd/${crd_name}" >/dev/null 2>&1 || true
-    sleep 1
-  done
+  else
+    for crd_file in "${crd_files[@]}"; do
+      crd_name=$(awk '/^  name: /{print $2; exit}' "${crd_file}" 2>/dev/null || true)
+      if [[ -z "${crd_name}" ]]; then
+        crd_name="$(basename "${crd_file}")"
+      fi
+      log "Aplicando CRD ${crd_name}"
+      if ! apply_crd_manifest_with_retry "${crd_name}" "${crd_file}"; then
+        log "falha ao aplicar ${crd_name}; interrompendo etapa observability."
+        exit 1
+      fi
+      kubectl wait --for=condition=Established --timeout=120s "crd/${crd_name}" >/dev/null 2>&1 || true
+      sleep 1
+    done
+  fi
 else
   log "CRDs do kube-prometheus-stack já existentes; pulando reaplicação."
 fi
@@ -109,9 +172,9 @@ helm_args=(
 if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
   helm_args+=(--set grafana.ingress.enabled=false)
   helm_args+=(--set grafana.service.type=LoadBalancer)
-  helm_args+=(--set grafana.service.annotations.oci\.oraclecloud\.com/load-balancer-type="${GRAFANA_LB_TYPE}")
-  helm_args+=(--set-string grafana.service.annotations.oci-network-load-balancer\.oraclecloud\.com/internal="${GRAFANA_LB_INTERNAL}")
-  helm_args+=(--set-string grafana.service.annotations.oci\.oraclecloud\.com/security-rule-management-mode="${GRAFANA_LB_SECURITY_RULE_MODE}")
+  helm_args+=(--set "grafana.service.annotations.oci\\.oraclecloud\\.com/load-balancer-type=${GRAFANA_LB_TYPE}")
+  helm_args+=(--set-string "grafana.service.annotations.oci-network-load-balancer\\.oraclecloud\\.com/internal=${GRAFANA_LB_INTERNAL}")
+  helm_args+=(--set-string "grafana.service.annotations.oci\\.oraclecloud\\.com/security-rule-management-mode=${GRAFANA_LB_SECURITY_RULE_MODE}")
 else
   helm_args+=(--set grafana.ingress.enabled=true)
   helm_args+=(--set grafana.ingress.ingressClassName=nginx)

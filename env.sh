@@ -137,8 +137,10 @@ export ENABLE_HUBBLE_INGRESS="${ENABLE_HUBBLE_INGRESS:-0}"
 export JOIN_SCRIPT_PATH="${JOIN_SCRIPT_PATH:-/root/join-worker.sh}"
 
 # Estado / logs
-export STATE_DIR="/var/opt/cluster-state"
-export LOG_FILE="/var/log/cluster-install.log"
+__ADB_STATE_BASE="${ROOT_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)}"
+export STATE_DIR="${STATE_DIR:-${__ADB_STATE_BASE}/.state/cluster-state}"
+export LOG_FILE="${LOG_FILE:-${__ADB_STATE_BASE}/.state/cluster-install.log}"
+unset __ADB_STATE_BASE
 
 if [[ $- == *i* ]]; then
   __ADB_ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

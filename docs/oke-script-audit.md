@@ -50,6 +50,10 @@ This document records OKE compatibility status for every shell script in `adb-k8
 - Exposure controls are now configurable by component (`ARGOCD_*`, `GRAFANA_*`, `LONGHORN_*`) through `env.sh`.
 - Bare-metal bootstrap stages (`10`, `20`, `30`, `35`) now auto-skip in `PLATFORM_MODE=oke` to avoid accidental execution.
 - Longhorn service patch now expands OKE LB variables correctly in JSON payload.
+- `bin/90-vcluster.sh` now supports automatic mode (`VC_MANUAL_EXECUTION=0`) and reports clear errors on non-interactive prompt flows.
+- `bin/70-observability.sh` now handles CRD discovery defensively (no unsafe glob failure when `crds/*.yaml` is absent) and includes fallback via `helm show crds`.
+- `scripts/oke-preflight-check.sh` now validates write access for `STATE_DIR`/`LOG_FILE` and fails early on permission issues.
+- `env.sh` now allows overriding `STATE_DIR` and `LOG_FILE` through environment variables.
 
 ## Next hardening targets (Phase 4)
 

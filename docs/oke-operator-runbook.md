@@ -75,6 +75,20 @@ cd /home/ilegna/Work/tcc/adb-k8s
 make preflight-oke
 ```
 
+Default runtime paths are local to the repository (`<repo>/.state/...`).
+
+If you need custom paths, set writable overrides before running stages:
+
+```bash
+cd /home/ilegna/Work/tcc/adb-k8s
+export STATE_DIR="$PWD/.state/cluster-state"
+export LOG_FILE="$PWD/.state/cluster-install.log"
+mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+make preflight-oke
+```
+
+If `helm` or `vcluster` are missing, runtime helpers can auto-install them. When `/usr/local/bin` is not writable, binaries are installed into `~/.local/bin`.
+
 ## 5) Configure OKE exposure behavior in env.sh
 
 `env.sh` now exposes these knobs:
@@ -129,6 +143,15 @@ bin/90-vcluster.sh
 
 Important: `bin/90-vcluster.sh` prompts manual execution of `scripts/vcluster/create.sh` commands for each cluster. Execute the printed command in another terminal, then return and press Enter.
 
+If you prefer automatic execution in the same terminal:
+
+```bash
+export VC_MANUAL_EXECUTION=0
+bin/90-vcluster.sh
+```
+
+In non-interactive terminals, keep `VC_MANUAL_EXECUTION=0` to avoid prompt failures.
+
 5. Argo CD:
 
 ```bash
@@ -162,11 +185,13 @@ bin/95-argocd.sh
 
 ## 7) Where runtime state is stored
 
-- State dir: `/var/opt/cluster-state`
-- Dynamic vars: `/var/opt/cluster-state/dynamic.env`
-- vCluster kubeconfigs: `/var/opt/cluster-state/kubeconfig-<cluster>.yaml`
+- State dir (default): `<repo>/.state/cluster-state`
+- Dynamic vars (default): `<repo>/.state/cluster-state/dynamic.env`
+- vCluster kubeconfigs (default): `<repo>/.state/cluster-state/kubeconfig-<cluster>.yaml`
 
 If this directory does not exist, the relevant stages were not run yet (or ran on another host/user context).
+
+`STATE_DIR` and `LOG_FILE` are overridable through environment variables.
 
 ## 8) Validate deployment and tenant routing
 
@@ -208,9 +233,9 @@ scripts/validate-tenant-routing-isolation.sh \
 
 ```bash
 scripts/validate-tenant-routing-isolation.sh \
-  --tenant-a-kubeconfig /var/opt/cluster-state/kubeconfig-tenant-a.yaml \
-  --tenant-b-kubeconfig /var/opt/cluster-state/kubeconfig-tenant-b.yaml \
-  --shared-kubeconfig /var/opt/cluster-state/kubeconfig-shared.yaml
+  --tenant-a-kubeconfig .state/cluster-state/kubeconfig-tenant-a.yaml \
+  --tenant-b-kubeconfig .state/cluster-state/kubeconfig-tenant-b.yaml \
+  --shared-kubeconfig .state/cluster-state/kubeconfig-shared.yaml
 ```
 
 ## 9) Public internet exposure (controlled)
@@ -301,22 +326,75 @@ bin/80-longhorn.sh
 
 ## 11) Troubleshooting quick notes
 
-### Error: kubeconfig not found in `/var/opt/cluster-state`
+### Error: kubeconfig not found in `.state/cluster-state`
 
 - Cause: vCluster stages were not executed on this host/context, or cluster names differ.
 - Action:
 
 ```bash
-ls -lah /var/opt/cluster-state
-cat /var/opt/cluster-state/dynamic.env
+ls -lah .state/cluster-state
+cat .state/cluster-state/dynamic.env
 ```
 
 Then run validator with explicit kubeconfig paths if needed.
+
+### Error: permission denied for `STATE_DIR` or `LOG_FILE`
+
+- Cause: current user cannot write to configured `STATE_DIR` or `LOG_FILE`.
+- Recommended fix (no sudo workflow):
+
+```bash
+cd /home/ilegna/Work/tcc/adb-k8s
+export STATE_DIR="$PWD/.state/cluster-state"
+export LOG_FILE="$PWD/.state/cluster-install.log"
+mkdir -p "$STATE_DIR" "$(dirname "$LOG_FILE")"
+make preflight-oke
+```
+
+The preflight now fails early when these paths are not writable.
+
+### Error: observability fails on `crds/*.yaml`
+
+- Cause: chart CRD path may be empty/changed for the pulled chart version.
+- Current behavior: script now tries fallback using `helm show crds` before failing.
+- Action: rerun `bin/70-observability.sh`; if it still fails, capture output and verify chart version/repository availability.
 
 ### Service pending external endpoint
 
 - Check OCI LB/NLB provisioning and subnet/NSG constraints.
 - Confirm annotation values and security-rule mode (`NSG`).
+
+### Service `LoadBalancer` pending with `NotAuthorizedOrNotFound` on `CreateNetworkSecurityGroup`
+
+- Symptom (from `kubectl describe svc ...` events):
+  - `SyncLoadBalancerFailed`
+  - `Operation Name: CreateNetworkSecurityGroup`
+  - `Error Code: NotAuthorizedOrNotFound`
+
+- Meaning:
+  - OKE cloud-controller is trying to manage NSGs for the service, but IAM/network scope is not allowing it in current compartment/subnet context.
+
+- Resolution path A (recommended): keep NSG mode and fix OCI IAM/network permissions.
+  - Verify OKE dynamic group/policies can manage NSGs and LB/NLB in the target compartment.
+  - Verify referenced subnet/compartment exists and is accessible to cluster policies.
+
+- Resolution path B (temporary fallback): use Security List mode.
+
+```bash
+cd /home/ilegna/Work/tcc/adb-k8s
+export OKE_LB_SECURITY_RULE_MODE="SL-All"
+export GRAFANA_LB_SECURITY_RULE_MODE="SL-All"
+export LONGHORN_LB_SECURITY_RULE_MODE="SL-All"
+export ARGOCD_LB_SECURITY_RULE_MODE="SL-All"
+```
+
+Then rerun the affected stage(s):
+
+```bash
+bin/70-observability.sh
+bin/80-longhorn.sh
+bin/95-argocd.sh
+```
 
 ### Public endpoint inaccessible
 

@@ -1,10 +1,21 @@
 # Changelog
 
 ## 2026-03-18
+- Hardening de runtime após falha real no estágio `observability`: `bin/70-observability.sh` agora trata ausência de `crds/*.yaml` de forma defensiva e aplica fallback via `helm show crds` antes de abortar.
+- Correção adicional no `observability`: aplicação de CRDs migrou para `kubectl apply --server-side --force-conflicts` com limite de tentativas, eliminando erro recorrente `metadata.annotations: Too long` (client-side apply em CRDs grandes).
+- `scripts/oke-preflight-check.sh` passou a validar escrita em `STATE_DIR` e `LOG_FILE`, falhando cedo quando permissões impedem execução (evita erro tardio no deploy).
+- `env.sh` agora permite sobrescrever `STATE_DIR` e `LOG_FILE` por ambiente, e `bin/lib.sh` valida criação/escrita desses paths com mensagens explícitas.
+- Defaults de runtime migrados para `<repo>/.state/*` (`STATE_DIR` e `LOG_FILE`), removendo dependência de `/var/*` no fluxo padrão.
+- `bin/60-rancher.sh` removeu arquivo temporário fixo em `/tmp` e adotou `mktemp` para evitar colisões.
+- Runbook OKE atualizado com troubleshooting específico para `SyncLoadBalancerFailed` + `CreateNetworkSecurityGroup` (`NotAuthorizedOrNotFound`) e caminhos de resolução (IAM NSG ou fallback `SL-All`).
 - Fase 3 iniciada: criado preflight operacional (`scripts/oke-preflight-check.sh`) com alvo `make preflight-oke` e fluxo agregado `make deploy-oke` para executar estágios OKE com gate inicial.
 - Estágios bare-metal `bin/10-so-requirements.sh`, `bin/20-kubeadm-init.sh`, `bin/30-cilium.sh` e `bin/35-join-workers.sh` agora fazem auto-skip em `PLATFORM_MODE=oke` para reduzir risco operacional.
 - Corrigida interpolação de variáveis no patch JSON do serviço Longhorn em OKE (anotações de LB agora aplicam valores reais de `LONGHORN_*`).
+- `bin/lib.sh` agora instala CLIs faltantes em `~/.local/bin` quando `/usr/local/bin` não é gravável, reduzindo dependência de root para `helm`, `vcluster` e `cilium`.
+- `bin/90-vcluster.sh` ganhou modo automático (`VC_MANUAL_EXECUTION=0`) e mensagens claras para execução em terminais não interativos.
 - Runbook OKE recebeu seção de rollback por estágio e atalhos de operação/validação (`preflight`, `deploy`, `report-oke-exposure`).
+- Registrada evidência operacional atual (preflight/exposure) indicando que a implantação OKE ainda não foi executada neste host/contexto. (`docs/oke-phases.md`, `docs/checkpoints/2026-03-03.md`)
+- Fase 3 marcada como concluída no rastreador de fases, com transição preparada para Fase 4 (deploy controlado e verificações de ponta a ponta). (`docs/oke-phases.md`)
 - Fase 2 da trilha OKE documentada com rastreamento de status por fases e auditoria completa de compatibilidade de scripts (`docs/oke-phases.md`, `docs/oke-script-audit.md`).
 - Adicionado relatório operacional de exposição (`scripts/oke-exposure-report.sh` + `make report-oke-exposure`) para identificar serviços internos/públicos e recursos de borda ativos.
 - Ajustado `bin/55-cert-manager.sh` para usar classe de ingress ACME compatível com modo OKE por padrão, evitando fallback fixo em `nginx`.

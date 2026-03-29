@@ -6,11 +6,12 @@
 
 - For Oracle OKE operation, use `docs/oke-operator-runbook.md` as the canonical guide.
 - That runbook contains: exact script order, validation gates, OCI Console paths (NSG/DNS/WAF), and controlled public exposure steps.
+- If `/var/opt` and `/var/log` are not writable for your user, set `STATE_DIR` and `LOG_FILE` to local writable paths before running `make preflight-oke` / `make deploy-oke`.
 
 ### Visão Geral
 
 - Cluster Kubernetes bare-metal com **Cilium** (kube-proxy-free + Hubble), **MetalLB** (L2), **Ingress-NGINX**, automações opcionais de **cert-manager** (TLS desabilitado por padrão), **Rancher**, observabilidade (**kube-prometheus-stack/Grafana**), **Longhorn** e **vcluster** para isolamento multi-tenant.
-- Scripts idempotentes, executados como root, guardam estado em `${STATE_DIR}` (padrão em `/var/opt/cluster-state`) e registram logs em `${LOG_FILE}` (padrão em `/var/log/cluster-install.log`).
+- Scripts idempotentes guardam estado em `${STATE_DIR}` (padrão em `<repo>/.state/cluster-state`) e registram logs em `${LOG_FILE}` (padrão em `<repo>/.state/cluster-install.log`).
 - TLS pode ser habilitado via cert-manager (aliases `sslip.io` disponíveis), porém o fluxo atual opera totalmente em HTTP para simplificar o acesso dentro da rede da UTFPR.
 
 ### Topologia

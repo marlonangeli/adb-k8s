@@ -1,7 +1,11 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-STATE_DIR="${STATE_DIR:-/var/opt/cluster-state}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+STATE_DIR="${STATE_DIR:-${ROOT_DIR}/.state/cluster-state}"
+LOG_FILE="${LOG_FILE:-${ROOT_DIR}/.state/cluster-install.log}"
 STRICT_MODE=0
 
 usage() {
@@ -116,7 +120,37 @@ echo "State directory: ${STATE_DIR}"
 if [[ -d "${STATE_DIR}" ]]; then
   ok "state directory exists"
 else
-  warn "state directory missing (scripts may not have been run yet on this host)"
+  if mkdir -p "${STATE_DIR}" 2>/dev/null; then
+    ok "state directory created by preflight (${STATE_DIR})"
+  else
+    fail "state directory is not writable/creatable (${STATE_DIR})"
+  fi
+fi
+
+if [[ -d "${STATE_DIR}" ]]; then
+  if [[ -w "${STATE_DIR}" ]]; then
+    ok "state directory is writable"
+  else
+    fail "state directory exists but is not writable"
+  fi
+fi
+
+echo "Log file: ${LOG_FILE}"
+log_dir="$(dirname "${LOG_FILE}")"
+if [[ -d "${log_dir}" ]]; then
+  ok "log directory exists (${log_dir})"
+else
+  if mkdir -p "${log_dir}" 2>/dev/null; then
+    ok "log directory created by preflight (${log_dir})"
+  else
+    fail "log directory is not writable/creatable (${log_dir})"
+  fi
+fi
+
+if touch "${LOG_FILE}" 2>/dev/null; then
+  ok "log file is writable (${LOG_FILE})"
+else
+  fail "log file is not writable (${LOG_FILE})"
 fi
 
 if [[ -f "${STATE_DIR}/dynamic.env" ]]; then
