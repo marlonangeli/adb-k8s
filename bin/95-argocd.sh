@@ -81,29 +81,65 @@ register_cluster_secret() {
     return
   }
 
-  if ! kubectl --kubeconfig "${kubeconfig_path}" get namespace default >/dev/null 2>&1; then
-    log "não foi possível consultar o cluster ${cluster} com o kubeconfig ${kubeconfig_path}; verifique conectividade."
-    return
+  if [[ "${ARGOCD_VALIDATE_CLUSTER_CONNECTIVITY:-0}" == "1" ]]; then
+    if ! kubectl --kubeconfig "${kubeconfig_path}" --request-timeout=10s get namespace default >/dev/null 2>&1; then
+      log "não foi possível consultar o cluster ${cluster} com o kubeconfig ${kubeconfig_path}; verifique conectividade."
+      return
+    fi
   fi
 
   local server_url
-  server_url=$(kubectl config view --kubeconfig "${kubeconfig_path}" -o jsonpath='{.clusters[0].cluster.server}')
+  server_url=$(kubectl config view --raw --kubeconfig "${kubeconfig_path}" -o jsonpath='{.clusters[0].cluster.server}')
   if [[ -z "${server_url}" ]]; then
     log "não foi possível extrair o endpoint kube-apiserver do kubeconfig ${kubeconfig_path}"
     return
   fi
 
+  local ca_data cert_data key_data tls_insecure cluster_config
+  ca_data=$(kubectl config view --raw --kubeconfig "${kubeconfig_path}" -o jsonpath='{.clusters[0].cluster.certificate-authority-data}' 2>/dev/null || true)
+  cert_data=$(kubectl config view --raw --kubeconfig "${kubeconfig_path}" -o jsonpath='{.users[0].user.client-certificate-data}' 2>/dev/null || true)
+  key_data=$(kubectl config view --raw --kubeconfig "${kubeconfig_path}" -o jsonpath='{.users[0].user.client-key-data}' 2>/dev/null || true)
+
+  tls_insecure="false"
+  if [[ -z "${ca_data}" ]]; then
+    tls_insecure="true"
+    log "kubeconfig ${kubeconfig_path} sem certificate-authority-data; registrando ${cluster} com tlsClientConfig.insecure=true."
+  fi
+
+  if [[ -n "${cert_data}" && -z "${key_data}" ]]; then
+    log "kubeconfig ${kubeconfig_path} possui client-certificate-data sem client-key-data; removendo credenciais mTLS inválidas para ${cluster}."
+    cert_data=""
+  fi
+  if [[ -n "${key_data}" && -z "${cert_data}" ]]; then
+    log "kubeconfig ${kubeconfig_path} possui client-key-data sem client-certificate-data; removendo credenciais mTLS inválidas para ${cluster}."
+    key_data=""
+  fi
+
+  cluster_config=$(cat <<EOF
+{
+  "tlsClientConfig": {
+    "insecure": ${tls_insecure}${ca_data:+,
+    "caData": "${ca_data}"}${cert_data:+,
+    "certData": "${cert_data}"}${key_data:+,
+    "keyData": "${key_data}"}
+  }
+}
+EOF
+  )
+
   if kubectl -n "${ARGOCD_NAMESPACE}" get secret "cluster-${cluster}" >/dev/null 2>&1; then
     local existing_server
     existing_server=$(kubectl -n "${ARGOCD_NAMESPACE}" get secret "cluster-${cluster}" -o jsonpath='{.data.server}' 2>/dev/null || true)
     if [[ -n "${existing_server}" ]]; then
-      existing_server="$(echo "${existing_server}" | base64 -d 2>/dev/null || true)"
+      existing_server="$(printf '%s' "${existing_server}" | base64 -d 2>/dev/null || true)"
     fi
     if [[ "${existing_server}" == "${server_url}" ]]; then
-      log "cluster ${cluster} já registrado no Argo CD (${server_url}); mantendo configuração atual."
-      return
+      log "cluster ${cluster} já existe no Argo CD (${server_url}); reconciliando configuração para evitar drift."
+    else
+      log "cluster ${cluster} registrado anteriormente com endpoint ${existing_server:-desconhecido}; atualizando para ${server_url}."
     fi
-    log "cluster ${cluster} registrado anteriormente com endpoint ${existing_server:-desconhecido}; atualizando para ${server_url}."
+  else
+    log "cluster ${cluster} ainda não registrado no Argo CD; criando secret com endpoint ${server_url}."
   fi
 
   kubectl -n "${ARGOCD_NAMESPACE}" apply -f - <<EOF
@@ -119,9 +155,7 @@ stringData:
   name: ${cluster}
   server: ${server_url}
   config: |
-    {}
-  kubeconfig: |
-$(sed 's/^/    /' "${kubeconfig_path}")
+$(sed 's/^/    /' <<<"${cluster_config}")
 EOF
   log "cluster ${cluster} registrado no Argo CD."
 }
@@ -149,8 +183,11 @@ for cluster in "${TENANT_IDS[@]}" "${SHARED_CLUSTER_NAME}"; do
 done
 
 # Obtém informações dos repositórios Git
-ADB_API_REPO_URL="${ADB_API_REPO_URL:-$(git -C "${ROOT_DIR}/adb-api-3" remote get-url origin 2>/dev/null || true)}"
-INTERPOLATION_REPO_URL="${INTERPOLATION_REPO_URL:-$(git -C "${ROOT_DIR}/adb-interpolation-api" remote get-url origin 2>/dev/null || true)}"
+ADB_API_LOCAL_DIR="${ADB_API_LOCAL_DIR:-${ROOT_DIR}/../adb-api-3}"
+INTERPOLATION_LOCAL_DIR="${INTERPOLATION_LOCAL_DIR:-${ROOT_DIR}/../adb-interpolation-api}"
+
+ADB_API_REPO_URL="${ADB_API_REPO_URL:-$(git -C "${ADB_API_LOCAL_DIR}" remote get-url origin 2>/dev/null || true)}"
+INTERPOLATION_REPO_URL="${INTERPOLATION_REPO_URL:-$(git -C "${INTERPOLATION_LOCAL_DIR}" remote get-url origin 2>/dev/null || true)}"
 
 if [[ -z "${ADB_API_REPO_URL}" || -z "${INTERPOLATION_REPO_URL}" ]]; then
   log "não foi possível determinar as URLs remotas dos repositórios das aplicações. Configure ADB_API_REPO_URL e INTERPOLATION_REPO_URL em env/secrets."
@@ -171,7 +208,7 @@ for tenant in "${TENANT_IDS[@]}"; do
   export ADB_API_REVISION
   export ADB_API_PATH="${ADB_API_PATH_ROOT}/${tenant}"
 
-  if [[ ! -d "${ROOT_DIR}/adb-api-3/${ADB_API_PATH}" ]]; then
+  if [[ ! -d "${ADB_API_LOCAL_DIR}/${ADB_API_PATH}" ]]; then
     log "overlay ${ADB_API_PATH} não encontrado em adb-api-3; pulei a Application do tenant ${tenant}."
     continue
   fi

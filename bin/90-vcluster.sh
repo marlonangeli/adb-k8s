@@ -20,8 +20,10 @@ prompt_manual_execution() {
 
   if [[ "${VC_MANUAL_EXECUTION}" == "0" ]]; then
     log "${message} Execução automática habilitada (VC_MANUAL_EXECUTION=0)."
-    "${cmd[@]}"
-    return
+    local cmd_rc=0
+    "${cmd[@]}" || cmd_rc=$?
+    vc::debug "execução automática finalizada com rc=${cmd_rc}"
+    return "${cmd_rc}"
   fi
 
   log "${message}"

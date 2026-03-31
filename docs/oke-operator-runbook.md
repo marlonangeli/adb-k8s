@@ -280,6 +280,59 @@ bin/80-longhorn.sh
 2. Attach WAF and update DNS to the WAF endpoint.
 3. Restrict origin LB ingress to WAF ranges.
 
+### 9.6 Public endpoint contract (OCI/OKE + DNS)
+
+Use this contract when promoting endpoints from internal to public.
+
+| Host | Kubernetes/OKE entrypoint | OCI resource mapping | DNS record target |
+|---|---|---|---|
+| `grafana.<domain>` | `Service` `monitoring/grafana` (`type=LoadBalancer`) | OKE-managed `lb`/`nlb` in `oci_core_subnet.lbs` | `A` -> public IP (preferred) |
+| `argocd.<domain>` | `Service` `argocd/argocd-server` (`type=LoadBalancer`) | OKE-managed `lb`/`nlb` in `oci_core_subnet.lbs` | `A` -> public IP (preferred) |
+| `adb-api.<tenant>.<domain>` | Tenant route (Ingress/Gateway) resolved to tenant vCluster app namespace | Shared/public edge LB/NLB + tenant-specific HTTP host routing | `A`/`CNAME` -> shared edge endpoint |
+
+`<domain>` is derived from `BASE_DOMAIN`.
+
+### 9.7 Required inputs (env + Terraform)
+
+Operator env inputs (`adb-k8s/env.sh`):
+
+- `BASE_DOMAIN`
+- `TENANTS` (must include all `<tenant>` slugs used in `adb-api.<tenant>.<domain>`)
+- `OKE_LB_TYPE_DEFAULT` or component overrides (`ARGOCD_LB_TYPE`, `GRAFANA_LB_TYPE`)
+- Public toggles: `ARGOCD_LB_INTERNAL=false`, `GRAFANA_LB_INTERNAL=false`
+- Optional host overrides: `ARGOCD_HOST_OVERRIDE`, `GRAFANA_HOST_OVERRIDE`
+
+Terraform/OCI inputs (DNS + provider):
+
+- `TF_VAR_tenancy_ocid`, `TF_VAR_oci_private_key`, `OCI_USER_OCID`, `OCI_FINGERPRINT`, `OCI_REGION`
+- DNS zone identifier (`zone_name_or_id`) for `<domain>`
+- Record definitions with `oci_dns_rrset` (`domain`, `rtype`, `items.rdata`, `items.ttl`)
+- Endpoint values from OKE-provisioned LB/NLB (`ip_addresses[*].ip_address` or reserved public IP)
+
+### 9.8 Tenant isolation constraints (data plane)
+
+- `adb-api.<tenant>.<domain>` must route only to that tenant's data-plane backend; cross-tenant routing is forbidden.
+- Tenant data plane remains private by default; expose only ingress edge required for host-based routing.
+- Keep backend services private (ClusterIP/internal) and enforce namespace/vCluster isolation.
+- Use NSG-first controls; allow only required ports/cidrs and keep LB/NLB in the same VCN security boundary.
+
+### 9.9 Remediation execution plan (concise)
+
+1. Enable public exposure only for control-plane UIs (`ARGOCD_LB_INTERNAL=false`, `GRAFANA_LB_INTERNAL=false`), rerun `bin/95-argocd.sh` and `bin/70-observability.sh`.
+2. Confirm external IP/hostname is allocated for both services (`kubectl get svc -A`).
+3. Apply Terraform DNS (`oci_dns_rrset`) for:
+   - `argocd.<domain>` -> Argo CD LB/NLB public endpoint
+   - `grafana.<domain>` -> Grafana LB/NLB public endpoint
+   - `adb-api.<tenant>.<domain>` -> shared edge endpoint (tenant host routing enabled)
+4. Run tenant-routing isolation validation before and after DNS cutover.
+5. If exposure fails, revert `*_LB_INTERNAL=true`, rerun affected stages, and remove/rollback DNS rrsets.
+
+Validation command:
+
+```bash
+mise exec -- kubectl get svc -A | rg 'argocd|grafana'
+```
+
 ## 10) Rollback and recovery snippets
 
 Use these snippets to revert specific OKE stages safely.

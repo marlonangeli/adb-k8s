@@ -430,15 +430,21 @@ vc::ensure_tenant_overlay() {
   local service_ip="$2"
   local shared_host="${3:-}"
 
-  [[ -d "${VC_TENANT_MANIFEST_ROOT}" ]] || return 0
-
-  local api_host interpolation_host overlay_dir
+  local api_host interpolation_host
   api_host="adb-api.${TENANT_TARGET_NAMESPACE}.svc.cluster.local"
   if [[ -n "${shared_host}" ]]; then
     interpolation_host="${shared_host}"
   else
     interpolation_host="${SHARED_INTERPOLATION_HOST}"
   fi
+
+  if [[ ! -d "${VC_TENANT_MANIFEST_ROOT}" ]]; then
+    vc::debug "VC_TENANT_MANIFEST_ROOT inexistente (${VC_TENANT_MANIFEST_ROOT}); pulando atualização de overlay para ${tenant}."
+    printf '%s %s\n' "${api_host}" "${interpolation_host}"
+    return 0
+  fi
+
+  local overlay_dir
 
   overlay_dir="${VC_TENANT_MANIFEST_ROOT}/${tenant}"
   mkdir -p "${overlay_dir}"
@@ -511,7 +517,6 @@ EOF
 
 vc::update_shared_overlay() {
   local service_ip="$1"
-  [[ -d "${VC_INTERPOLATION_OVERLAY_DIR}" ]] || return 0
 
   local interpolation_host
   if [[ -n "${SHARED_INTERPOLATION_HOST}" ]]; then
@@ -521,6 +526,13 @@ vc::update_shared_overlay() {
   else
     interpolation_host="adb-interpolation-api.processing.svc.cluster.local"
   fi
+
+  if [[ ! -d "${VC_INTERPOLATION_OVERLAY_DIR}" ]]; then
+    vc::debug "VC_INTERPOLATION_OVERLAY_DIR inexistente (${VC_INTERPOLATION_OVERLAY_DIR}); pulando atualização de overlay compartilhado."
+    printf '%s\n' "${interpolation_host}"
+    return 0
+  fi
+
   vc::debug "Atualizando overlay compartilhado com Service IP=${service_ip} host=${interpolation_host}"
 
   cat >"${VC_INTERPOLATION_OVERLAY_DIR}/settings.env" <<EOF

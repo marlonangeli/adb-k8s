@@ -111,8 +111,11 @@ register_tmp() {
 cleanup_tmp() {
   local path
   for path in "${tmp_artifacts[@]}"; do
-    [[ -e "$path" ]] && rm -rf "$path"
+    if [[ -e "$path" ]]; then
+      rm -rf "$path" || true
+    fi
   done
+  return 0
 }
 
 render_template() {
