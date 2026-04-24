@@ -9,6 +9,9 @@ donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 require_commands kubectl
 ensure_helm
 : "${CILIUM_SERVICE_MONITOR_PENDING:=0}"
+: "${PROMETHEUS_REQUEST_CPU:=100m}"
+: "${PROMETHEUS_SCRAPE_INTERVAL:=30s}"
+: "${PROMETHEUS_CLUSTER_LABEL:=oke}"
 : "${GRAFANA_ADMIN_USER:?defina GRAFANA_ADMIN_USER em secrets.env}"
 : "${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD em secrets.env}"
 
@@ -140,33 +143,37 @@ helm_args=(
   --timeout 15m
   --set grafana.adminUser="${GRAFANA_ADMIN_USER}"
   --set grafana.adminPassword="${GRAFANA_ADMIN_PASSWORD}"
-  --set grafana.resources.requests.cpu=100m
+  --set grafana.resources.requests.cpu=50m
   --set grafana.resources.requests.memory=192Mi
   --set grafana.resources.limits.cpu=500m
   --set grafana.resources.limits.memory=384Mi
-  --set prometheusOperator.resources.requests.cpu=100m
+  --set prometheusOperator.resources.requests.cpu=50m
   --set prometheusOperator.resources.requests.memory=192Mi
   --set prometheusOperator.resources.limits.cpu=400m
   --set prometheusOperator.resources.limits.memory=384Mi
-  --set kubeStateMetrics.resources.requests.cpu=100m
+  --set kubeStateMetrics.resources.requests.cpu=50m
   --set kubeStateMetrics.resources.requests.memory=192Mi
   --set kubeStateMetrics.resources.limits.cpu=300m
   --set kubeStateMetrics.resources.limits.memory=256Mi
+  --set kubeStateMetrics.enabled=true
+  --set kubeStateMetrics.replicaCount=1
   --set nodeExporter.resources.requests.cpu=40m
   --set nodeExporter.resources.requests.memory=48Mi
   --set nodeExporter.resources.limits.cpu=180m
   --set nodeExporter.resources.limits.memory=192Mi
-  --set prometheus.prometheusSpec.resources.requests.cpu=250m
+  --set prometheus.prometheusSpec.resources.requests.cpu="${PROMETHEUS_REQUEST_CPU}"
   --set prometheus.prometheusSpec.resources.requests.memory=512Mi
   --set prometheus.prometheusSpec.resources.limits.cpu=800m
   --set prometheus.prometheusSpec.resources.limits.memory=1.25Gi
   --set prometheus.prometheusSpec.retention=7d
+  --set-string prometheus.prometheusSpec.externalLabels.cluster="${PROMETHEUS_CLUSTER_LABEL}"
   --set kubeScheduler.enabled=false
   --set kubeControllerManager.enabled=false
   --set kubeEtcd.enabled=false
   --set kubeProxy.enabled=false
   --set alertmanager.enabled=false
-  --set global.scrapeInterval=60s
+  --set prometheus.prometheusSpec.scrapeInterval="${PROMETHEUS_SCRAPE_INTERVAL}"
+  --set global.scrapeInterval="${PROMETHEUS_SCRAPE_INTERVAL}"
 )
 
 if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
@@ -195,6 +202,9 @@ helm "${helm_args[@]}"
 log "validando rollout do kube-prometheus-stack"
 wait_rollout monitoring deployment kube-prometheus-stack-operator
 wait_rollout monitoring deployment kube-prometheus-stack-grafana
+if kubectl -n monitoring get deployment kube-prometheus-stack-kube-state-metrics >/dev/null 2>&1; then
+  wait_rollout monitoring deployment kube-prometheus-stack-kube-state-metrics
+fi
 if kubectl -n monitoring get statefulset kube-prometheus-stack-prometheus >/dev/null 2>&1; then
   wait_rollout monitoring statefulset kube-prometheus-stack-prometheus
 fi

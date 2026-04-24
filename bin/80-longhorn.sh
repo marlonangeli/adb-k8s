@@ -8,6 +8,8 @@ donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
 require_commands kubectl envsubst
 ensure_helm
+: "${LONGHORN_DEFAULT_REPLICA_COUNT:=2}"
+: "${LONGHORN_STORAGECLASS_NAME:=longhorn-2}"
 
 if [[ "${PLATFORM_MODE:-baremetal}" != "oke" ]]; then
   if ! donep "ingress-nginx"; then
@@ -27,7 +29,7 @@ helm repo update
 kubectl create ns longhorn-system || true
 
 helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
-  --set-string defaultSettings.defaultReplicaCount="2" \
+  --set-string defaultSettings.defaultReplicaCount="${LONGHORN_DEFAULT_REPLICA_COUNT}" \
   --set longhornManager.resources.requests.cpu=120m \
   --set longhornManager.resources.requests.memory=160Mi \
   --set longhornManager.resources.limits.cpu=350m \
@@ -52,6 +54,32 @@ helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
   --set csi.snapshotter.resources.requests.memory=48Mi \
   --set csi.snapshotter.resources.limits.cpu=100m \
   --set csi.snapshotter.resources.limits.memory=96Mi
+
+kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ${LONGHORN_STORAGECLASS_NAME}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "${LONGHORN_DEFAULT_REPLICA_COUNT}"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: ext4
+  dataLocality: disabled
+  unmapMarkSnapChainRemoved: ignored
+  disableRevisionCounter: "true"
+  dataEngine: v1
+  backupTargetName: default
+EOF
+
+kubectl annotate storageclass longhorn storageclass.kubernetes.io/is-default-class="false" --overwrite >/dev/null 2>&1 || true
+kubectl annotate storageclass "${LONGHORN_STORAGECLASS_NAME}" storageclass.kubernetes.io/is-default-class="true" --overwrite >/dev/null
 
 log "validando rollout do Longhorn"
 wait_rollout longhorn-system deployment longhorn-ui

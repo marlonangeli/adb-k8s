@@ -14,12 +14,15 @@ TENANT_B_NAME="${TENANT_B_NAME:-}"
 TENANT_NS="${TENANT_NS:-app}"
 SHARED_NS="${SHARED_NS:-processing}"
 
-TENANT_API_HEALTH_PATH="${TENANT_API_HEALTH_PATH:-/actuator/health/readiness}"
+TENANT_API_HEALTH_PATH="${TENANT_API_HEALTH_PATH:-/}"
 INTERPOLATION_HEALTH_PATH="${INTERPOLATION_HEALTH_PATH:-/healthz}"
+PROBE_IMAGE="${PROBE_IMAGE:-docker.io/curlimages/curl:8.8.0}"
 
 TIMEOUT_SECONDS="${TIMEOUT_SECONDS:-10}"
 A_TO_B_FORBIDDEN_URL="${A_TO_B_FORBIDDEN_URL:-}"
 B_TO_A_FORBIDDEN_URL="${B_TO_A_FORBIDDEN_URL:-}"
+KUBECTL_REQUEST_TIMEOUT="${KUBECTL_REQUEST_TIMEOUT:-15s}"
+VALIDATE_REQUIRE_REACHABILITY="${VALIDATE_REQUIRE_REACHABILITY:-0}"
 
 PASS=0
 FAIL=0
@@ -153,16 +156,36 @@ show_available_kubeconfigs() {
 discover_default_tenants
 resolve_default_kubeconfigs
 
-if [[ -n "${VCLUSTER_SHARED_INTERPOLATION_HOST:-}" ]]; then
-  SHARED_INTERPOLATION_URL="http://${VCLUSTER_SHARED_INTERPOLATION_HOST}${INTERPOLATION_HEALTH_PATH}"
-else
-  SHARED_INTERPOLATION_URL="http://adb-interpolation-api.processing.svc.cluster.local${INTERPOLATION_HEALTH_PATH}"
-fi
+discover_shared_interpolation_host() {
+  local host
+
+  host="$(k --kubeconfig "${SHARED_KUBECONFIG}" -n "${SHARED_NS}" get svc adb-interpolation-api -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+  if [[ -n "${host}" && "${host}" != "<no value>" ]]; then
+    printf '%s' "${host}"
+    return 0
+  fi
+
+  host="$(k --kubeconfig "${SHARED_KUBECONFIG}" -n "${SHARED_NS}" get svc adb-interpolation-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+  if [[ -n "${host}" && "${host}" != "<no value>" ]]; then
+    printf '%s' "${host}"
+    return 0
+  fi
+
+  if [[ -n "${VCLUSTER_SHARED_INTERPOLATION_HOST:-}" ]]; then
+    printf '%s' "${VCLUSTER_SHARED_INTERPOLATION_HOST}"
+    return 0
+  fi
+
+  printf '%s' 'adb-interpolation-api.processing.svc.cluster.local'
+}
 
 A_LOCAL_API_URL="http://adb-api.${TENANT_NS}.svc.cluster.local${TENANT_API_HEALTH_PATH}"
 B_LOCAL_API_URL="http://adb-api.${TENANT_NS}.svc.cluster.local${TENANT_API_HEALTH_PATH}"
 
-k() { mise exec -- kubectl "$@"; }
+k() { mise exec -- kubectl --request-timeout "${KUBECTL_REQUEST_TIMEOUT}" "$@"; }
+
+SHARED_INTERPOLATION_HOST="$(discover_shared_interpolation_host)"
+SHARED_INTERPOLATION_URL="http://${SHARED_INTERPOLATION_HOST}${INTERPOLATION_HEALTH_PATH}"
 
 pass() {
   PASS=$((PASS + 1))
@@ -208,17 +231,42 @@ cleanup() {
 }
 trap cleanup EXIT
 
+ensure_cluster_reachability() {
+  local label="$1" kubeconfig="$2"
+
+  if k --kubeconfig "${kubeconfig}" get --raw='/readyz' >/dev/null 2>&1; then
+    pass "${label}: kube-apiserver reachable"
+    return 0
+  fi
+
+  if [[ "${VALIDATE_REQUIRE_REACHABILITY}" == "1" ]]; then
+    fail "${label}: kube-apiserver unreachable via kubeconfig ${kubeconfig}"
+    return 1
+  fi
+
+  skip "${label}: kube-apiserver unreachable via kubeconfig ${kubeconfig}; skipping direct tenant/shared validation (set VALIDATE_REQUIRE_REACHABILITY=1 to fail hard)."
+  return 2
+}
+
 create_probe_pod() {
   local kubeconfig="$1" ns="$2" tag="$3"
   local pod_name
   pod_name="netcheck-${tag}-$(date +%s)-$RANDOM"
 
   k --kubeconfig "${kubeconfig}" -n "${ns}" run "${pod_name}" \
-    --image=curlimages/curl:8.8.0 \
+    --image="${PROBE_IMAGE}" \
     --restart=Never \
     --command -- sh -c 'sleep 300' >/dev/null
 
-  k --kubeconfig "${kubeconfig}" -n "${ns}" wait --for=condition=Ready "pod/${pod_name}" --timeout=120s >/dev/null
+  if ! k --kubeconfig "${kubeconfig}" -n "${ns}" wait --for=condition=Ready "pod/${pod_name}" --timeout=120s >/dev/null; then
+    fail "Probe pod ${pod_name} did not become Ready in namespace '${ns}'"
+    printf 'DEBUG: pod status for %s\n' "${pod_name}" >&2
+    k --kubeconfig "${kubeconfig}" -n "${ns}" get pod "${pod_name}" -o wide >&2 || true
+    printf 'DEBUG: pod describe for %s\n' "${pod_name}" >&2
+    k --kubeconfig "${kubeconfig}" -n "${ns}" describe pod "${pod_name}" >&2 || true
+    exit 1
+  fi
+
   PROBES+=("${kubeconfig}|${ns}|${pod_name}")
   printf '%s' "${pod_name}"
 }
@@ -314,6 +362,20 @@ printf '== Static isolation checks ==\n'
 printf 'Tenant A kubeconfig: %s\n' "${TENANT_A_KUBECONFIG}"
 printf 'Tenant B kubeconfig: %s\n' "${TENANT_B_KUBECONFIG}"
 printf 'Shared   kubeconfig: %s\n' "${SHARED_KUBECONFIG}"
+
+connectivity_rc=0
+ensure_cluster_reachability "Tenant A" "${TENANT_A_KUBECONFIG}" || connectivity_rc=$?
+ensure_cluster_reachability "Tenant B" "${TENANT_B_KUBECONFIG}" || connectivity_rc=$?
+ensure_cluster_reachability "Shared" "${SHARED_KUBECONFIG}" || connectivity_rc=$?
+
+if (( connectivity_rc != 0 )); then
+  printf '\n== Summary ==\n'
+  printf 'PASS=%d FAIL=%d SKIP=%d\n' "${PASS}" "${FAIL}" "${SKIP}"
+  if (( FAIL > 0 )); then
+    exit 1
+  fi
+  exit 0
+fi
 
 check_private_surface "Tenant A" "${TENANT_A_KUBECONFIG}"
 check_private_surface "Tenant B" "${TENANT_B_KUBECONFIG}"

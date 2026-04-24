@@ -1,5 +1,10 @@
 # Changelog
 
+## 2026-04-13
+- Observabilidade OKE agora expõe `PROMETHEUS_REQUEST_CPU` e `PROMETHEUS_SCRAPE_INTERVAL` em `env.sh`; o estágio `bin/70-observability.sh` passou a aplicar `scrapeInterval` configurável (default seguro em `30s`) para permitir testes com polling mais frequente sem voltar ao perfil de carga anterior.
+- O estágio `bin/80-longhorn.sh` agora explicita `LONGHORN_DEFAULT_REPLICA_COUNT`, cria/atualiza a StorageClass `longhorn-2` e a promove como default, evitando a limitação de imutabilidade do `StorageClass longhorn` original e alinhando novos volumes ao cluster OKE de 2 nós.
+- Afinado o perfil `Always Free`: requests default dos control planes/syncers de vCluster foram reduzidos em `env.sh`, o `kube-prometheus-stack` baixou requests de Grafana/operator/kube-state-metrics, e os manifests das APIs/DB compartilhada foram enxugados para caber melhor em OKE A1 2x2 OCPU/24 GiB sem sacrificar o isolamento multi-tenant.
+
 ## 2026-03-18
 - Hardening de runtime após falha real no estágio `observability`: `bin/70-observability.sh` agora trata ausência de `crds/*.yaml` de forma defensiva e aplica fallback via `helm show crds` antes de abortar.
 - Correção adicional no `observability`: aplicação de CRDs migrou para `kubectl apply --server-side --force-conflicts` com limite de tentativas, eliminando erro recorrente `metadata.annotations: Too long` (client-side apply em CRDs grandes).

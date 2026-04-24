@@ -10,8 +10,8 @@ This file tracks execution phases for the OKE migration and hardening work.
 | 1 | Validate core OKE path and tenant isolation baseline | complete | Kustomize checks + tenant isolation validator in place |
 | 2 | Public exposure controls + operator guidance | complete | runbook + exposure toggles + reporting + audit published |
 | 3 | Full script remediation and consistency cleanup | complete | preflight checks, safety guards and execution-mode fixes applied |
-| 4 | Controlled deployment and end-to-end verification | pending | execute in order and capture evidence |
-| 5 | Public internet go-live hardening | pending | NSG/DNS/WAF/TLS final checks |
+| 4 | Controlled deployment and end-to-end verification | complete | OKE apps healthy, public operator endpoints live, vClusters reachable |
+| 5 | Public internet go-live hardening | in progress | public operator endpoints active; DNS-friendly names + stress evidence still pending |
 
 ## Phase 0 - Completed
 
@@ -80,4 +80,62 @@ make report-oke-exposure
 
 # Phase 3 evidence
 make preflight-oke
+```
+
+## Phase 4 - Completed (2026-04-16)
+
+### Completed in this phase
+
+- Grafana and Argo CD were successfully exposed through public OKE `LoadBalancer`s.
+- vClusters `shared`, `abc`, and `xyz` were moved to public endpoints and their
+  kubeconfigs were updated.
+- Argo CD cluster registration was repaired after endpoint changes by rewriting
+  cluster secrets with client-cert auth and restarting the application controller.
+- Longhorn was aligned to the actual OKE topology (`2 replicas` for tenant DB
+  volumes, new default `longhorn-2` StorageClass).
+- The cluster was tuned to fit `Always Free` constraints without increasing node
+  count or shape.
+- Final application state reached:
+  - `shared-interpolation` -> `Synced / Healthy`
+  - `tenant-abc-adb-api` -> `Synced / Healthy`
+  - `tenant-xyz-adb-api` -> `Synced / Healthy`
+
+### Public endpoints validated
+
+- Grafana -> `144.22.151.206`
+- Argo CD -> `168.138.153.100`
+- vCluster `shared` -> `147.15.124.246`
+- vCluster `abc` -> `163.176.198.222`
+- vCluster `xyz` -> `64.181.184.95`
+
+### Recovery notes captured in this phase
+
+- OKE service exposure changes required reprovision/recreation in practice.
+- vCluster control-plane redeploys can drop internal objects when persistence is
+  disabled; `abc` required manual restore of `kube-system/coredns` to recover
+  DNS and unblock tenant bootstrap.
+- Cluster capacity pressure was mitigated by reducing requests in:
+  - vCluster control planes/syncers
+  - tenant/shared workloads
+  - observability components
+
+## Phase 5 - In progress
+
+### Immediate goals
+
+- Capture final evidence package on the stabilized cluster.
+- Prepare and execute stress tests with Grafana/Prometheus collection.
+- Keep public operator endpoints working while preserving `Always Free`
+  headroom.
+
+### Recommended evidence commands now
+
+```bash
+cd /home/ilegna/Work/tcc/adb-k8s
+source ./env.sh
+source ./secrets.env
+
+make report-oke-exposure
+make validate-tenant-routing
+mise exec -- kubectl -n argocd get applications -A
 ```

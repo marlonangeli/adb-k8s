@@ -100,12 +100,6 @@ register_cluster_secret() {
   cert_data=$(kubectl config view --raw --kubeconfig "${kubeconfig_path}" -o jsonpath='{.users[0].user.client-certificate-data}' 2>/dev/null || true)
   key_data=$(kubectl config view --raw --kubeconfig "${kubeconfig_path}" -o jsonpath='{.users[0].user.client-key-data}' 2>/dev/null || true)
 
-  tls_insecure="false"
-  if [[ -z "${ca_data}" ]]; then
-    tls_insecure="true"
-    log "kubeconfig ${kubeconfig_path} sem certificate-authority-data; registrando ${cluster} com tlsClientConfig.insecure=true."
-  fi
-
   if [[ -n "${cert_data}" && -z "${key_data}" ]]; then
     log "kubeconfig ${kubeconfig_path} possui client-certificate-data sem client-key-data; removendo credenciais mTLS inválidas para ${cluster}."
     cert_data=""
@@ -115,17 +109,26 @@ register_cluster_secret() {
     key_data=""
   fi
 
-  cluster_config=$(cat <<EOF
-{
-  "tlsClientConfig": {
-    "insecure": ${tls_insecure}${ca_data:+,
-    "caData": "${ca_data}"}${cert_data:+,
-    "certData": "${cert_data}"}${key_data:+,
-    "keyData": "${key_data}"}
-  }
-}
-EOF
-  )
+  tls_insecure="false"
+  if [[ -n "${cert_data}" && -n "${key_data}" ]]; then
+    tls_insecure="true"
+    log "kubeconfig ${kubeconfig_path} usa autenticação por certificado; registrando ${cluster} com tlsClientConfig.insecure=true para evitar falhas de CA em endpoints vcluster."
+  elif [[ -z "${ca_data}" ]]; then
+    tls_insecure="true"
+    log "kubeconfig ${kubeconfig_path} sem certificate-authority-data; registrando ${cluster} com tlsClientConfig.insecure=true."
+  fi
+
+  cluster_config='{"tlsClientConfig":{"insecure":'"${tls_insecure}"
+  if [[ "${tls_insecure}" == "false" && -n "${ca_data}" ]]; then
+    cluster_config+=',"caData":"'"${ca_data}"'"'
+  fi
+  if [[ -n "${cert_data}" ]]; then
+    cluster_config+=',"certData":"'"${cert_data}"'"'
+  fi
+  if [[ -n "${key_data}" ]]; then
+    cluster_config+=',"keyData":"'"${key_data}"'"'
+  fi
+  cluster_config+='}}'
 
   if kubectl -n "${ARGOCD_NAMESPACE}" get secret "cluster-${cluster}" >/dev/null 2>&1; then
     local existing_server
@@ -186,6 +189,16 @@ done
 ADB_API_LOCAL_DIR="${ADB_API_LOCAL_DIR:-${ROOT_DIR}/../adb-api-3}"
 INTERPOLATION_LOCAL_DIR="${INTERPOLATION_LOCAL_DIR:-${ROOT_DIR}/../adb-interpolation-api}"
 
+if [[ ! -d "${ADB_API_LOCAL_DIR}" && -d "${ROOT_DIR}/../adb-api-3" ]]; then
+  log "ADB_API_LOCAL_DIR=${ADB_API_LOCAL_DIR} não existe; usando fallback ${ROOT_DIR}/../adb-api-3."
+  ADB_API_LOCAL_DIR="${ROOT_DIR}/../adb-api-3"
+fi
+
+if [[ ! -d "${INTERPOLATION_LOCAL_DIR}" && -d "${ROOT_DIR}/../adb-interpolation-api" ]]; then
+  log "INTERPOLATION_LOCAL_DIR=${INTERPOLATION_LOCAL_DIR} não existe; usando fallback ${ROOT_DIR}/../adb-interpolation-api."
+  INTERPOLATION_LOCAL_DIR="${ROOT_DIR}/../adb-interpolation-api"
+fi
+
 ADB_API_REPO_URL="${ADB_API_REPO_URL:-$(git -C "${ADB_API_LOCAL_DIR}" remote get-url origin 2>/dev/null || true)}"
 INTERPOLATION_REPO_URL="${INTERPOLATION_REPO_URL:-$(git -C "${INTERPOLATION_LOCAL_DIR}" remote get-url origin 2>/dev/null || true)}"
 
@@ -208,9 +221,11 @@ for tenant in "${TENANT_IDS[@]}"; do
   export ADB_API_REVISION
   export ADB_API_PATH="${ADB_API_PATH_ROOT}/${tenant}"
 
-  if [[ ! -d "${ADB_API_LOCAL_DIR}/${ADB_API_PATH}" ]]; then
+  if [[ -d "${ADB_API_LOCAL_DIR}" && ! -d "${ADB_API_LOCAL_DIR}/${ADB_API_PATH}" ]]; then
     log "overlay ${ADB_API_PATH} não encontrado em adb-api-3; pulei a Application do tenant ${tenant}."
     continue
+  elif [[ ! -d "${ADB_API_LOCAL_DIR}" ]]; then
+    log "ADB_API_LOCAL_DIR=${ADB_API_LOCAL_DIR} indisponível; aplicando Application do tenant ${tenant} sem validação local de overlay."
   fi
 
   manifest=$(render_template "${ROOT_DIR}/manifests/argocd/application-tenant.yaml")

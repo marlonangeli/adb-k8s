@@ -95,7 +95,7 @@ vc::load_defaults() {
   : "${VCLUSTER_LOAD_BALANCER_TYPE:=nlb}"
   : "${VCLUSTER_LOAD_BALANCER_INTERNAL:=true}"
   : "${VCLUSTER_LB_SECURITY_RULE_MODE:=NSG}"
-  : "${SHARED_INTERPOLATION_HOST:=adb-interpolation-api.processing.svc.cluster.local}"
+  : "${SHARED_INTERPOLATION_HOST:=}"
   : "${VC_DISABLE_NETWORK_POLICIES:=0}"
 }
 
@@ -144,6 +144,32 @@ vc::ensure_prereqs() {
     VC_MONITORING_READY=0
     log "namespace monitoring não encontrado; kubeconfigs dos vclusters não serão publicados para observabilidade."
   fi
+}
+
+vc::discover_shared_interpolation_host() {
+  local shared_kubeconfig="${VCLUSTER_SHARED_KUBECONFIG:-${STATE_DIR}/kubeconfig-${SHARED_VCLUSTER_NAME}.yaml}"
+  local host
+
+  if [[ -f "${shared_kubeconfig}" ]]; then
+    host="$(kubectl --kubeconfig "${shared_kubeconfig}" -n processing get svc adb-interpolation-api -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+    if [[ -n "${host}" && "${host}" != "<no value>" ]]; then
+      printf '%s\n' "${host}"
+      return 0
+    fi
+
+    host="$(kubectl --kubeconfig "${shared_kubeconfig}" -n processing get svc adb-interpolation-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+    if [[ -n "${host}" && "${host}" != "<no value>" ]]; then
+      printf '%s\n' "${host}"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${SHARED_INTERPOLATION_HOST}" ]]; then
+    printf '%s\n' "${SHARED_INTERPOLATION_HOST}"
+    return 0
+  fi
+
+  printf '%s\n' 'adb-interpolation-api.processing.svc.cluster.local'
 }
 
 vc::cluster_checkpoint() {
@@ -275,6 +301,10 @@ EOF
 EOF
     fi
     cat <<EOF
+  coredns:
+    deployment:
+      image: ${VCLUSTER_COREDNS_IMAGE}
+
   statefulSet:
     highAvailability:
       replicas: ${cp_replicas}
@@ -435,7 +465,7 @@ vc::ensure_tenant_overlay() {
   if [[ -n "${shared_host}" ]]; then
     interpolation_host="${shared_host}"
   else
-    interpolation_host="${SHARED_INTERPOLATION_HOST}"
+    interpolation_host="$(vc::discover_shared_interpolation_host)"
   fi
 
   if [[ ! -d "${VC_TENANT_MANIFEST_ROOT}" ]]; then
@@ -479,7 +509,7 @@ TENANT_ID=${tenant}
 PUBLIC_BASE_URL=http://${api_host}
 INTERPOLATION_BASE_URL=http://${interpolation_host}
 INTERPOLATION_LOAD_BALANCER_MODE=least_conn
-JAVA_OPTS=-Xms512m -Xmx1500m
+JAVA_OPTS=-Xms256m -Xmx768m
 JPA_DDL_AUTO=none
 HIBERNATE_DIALECT_RUNTIME=org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
 HIBERNATE_DIALECT_SEED=org.hibernate.dialect.PostgreSQLDialect
@@ -519,13 +549,7 @@ vc::update_shared_overlay() {
   local service_ip="$1"
 
   local interpolation_host
-  if [[ -n "${SHARED_INTERPOLATION_HOST}" ]]; then
-    interpolation_host="${SHARED_INTERPOLATION_HOST}"
-  elif [[ -n "${service_ip}" ]]; then
-    interpolation_host="${service_ip}"
-  else
-    interpolation_host="adb-interpolation-api.processing.svc.cluster.local"
-  fi
+  interpolation_host="$(vc::discover_shared_interpolation_host)"
 
   if [[ ! -d "${VC_INTERPOLATION_OVERLAY_DIR}" ]]; then
     vc::debug "VC_INTERPOLATION_OVERLAY_DIR inexistente (${VC_INTERPOLATION_OVERLAY_DIR}); pulando atualização de overlay compartilhado."

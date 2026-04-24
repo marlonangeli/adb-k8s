@@ -9,8 +9,6 @@ spec:
     repoURL: ${INTERPOLATION_REPO_URL}
     targetRevision: ${INTERPOLATION_REVISION}
     path: ${INTERPOLATION_PATH}
-    directory:
-      recurse: true
   destination:
     name: ${INTERPOLATION_CLUSTER_NAME}
     namespace: ${INTERPOLATION_NAMESPACE}

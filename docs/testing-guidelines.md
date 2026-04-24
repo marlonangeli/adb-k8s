@@ -25,9 +25,46 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 - Evite cenarios dependentes de `sslip.io` no fluxo OKE; use DNS real do
   ambiente alvo.
 
+## Estado operacional atual para testes (2026-04)
+
+- Endpoints públicos disponíveis para evidência:
+  - Grafana -> `http://144.22.151.206`
+  - Argo CD -> `http://168.138.153.100`
+- vClusters acessíveis por kubeconfig público:
+  - `shared` -> `147.15.124.246`
+  - `abc` -> `163.176.198.222`
+  - `xyz` -> `64.181.184.95`
+- Estado base antes de iniciar carga:
+  - `shared-interpolation` -> `Synced / Healthy`
+  - `tenant-abc-adb-api` -> `Synced / Healthy`
+  - `tenant-xyz-adb-api` -> `Synced / Healthy`
+
+## Regras para stress tests em Always Free
+
+1. **Não aumentar capacidade do nodepool**.
+2. Começar sempre com carga leve e subir em rampas.
+3. Monitorar continuamente:
+   - `kubectl -n argocd get applications -A`
+   - `kubectl top nodes`
+   - `kubectl top pods -A`
+   - dashboards do Grafana
+4. Interromper a carga se qualquer tenant sair de `Healthy`.
+5. Evitar reabilitar componentes opcionais de observabilidade/Argo antes dos
+   testes sem revisar headroom.
+
 ## Testes de uso de recursos
 
 1. Gere carga com os scripts k6 (`tenant-ramp.js`, `shared-interpolation.js`).
+2. Antes de iniciar, capture baseline do cluster:
+   ```bash
+   cd /home/ilegna/Work/tcc/adb-k8s
+   source ./env.sh
+   source ./secrets.env
+
+   mise exec -- kubectl -n argocd get applications -A
+   mise exec -- kubectl top nodes
+   mise exec -- kubectl top pods -A
+   ```
 2. Exporte o kubeconfig do tenant a partir do secret publicado em `monitoring`
    e configure a fonte de dados *Kubernetes* no Grafana:
    ```bash
@@ -39,10 +76,17 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
    `container_memory_working_set_bytes` filtrando por namespace
    `vcluster-tenant-a`.
 4. Correlacione com métricas de rede no Hubble UI filtrando namespace e pod.
+5. Registre também o consumo dos componentes de infra principais (`vcluster-*`,
+   `longhorn-system`, `monitoring`, `argocd`) para justificar o tuning
+   `Always Free` na análise do TCC.
 
 ## Testes de escalabilidade
 
-1. Configure um cenário k6 com rampas de carga (ex.: 0 → 200 VUs em 5 minutos).
+1. Configure um cenário k6 com rampas progressivas. Para este cluster, prefira
+   começar com algo como:
+   - `0 -> 20 VUs` em 2 min
+   - `20 -> 50 VUs` em 3 min
+   - só depois elevar caso o cluster permaneça saudável
 2. Observe o HPA com `kubectl --kubeconfig tenant-a.kubeconfig describe hpa
    adb-api` e confirme que o número de réplicas aumenta quando a utilização de
    CPU ultrapassa 70%.
@@ -114,3 +158,9 @@ heterogêneos). No contexto atual:
   junto às métricas de Grafana.
 - Para testes de resiliência, simule a queda de um pod (`kubectl delete pod`) e
   prove que o Deployment/HPA recupera a capacidade sem intervenção manual.
+- Mantenha uma tabela simples por execução contendo:
+  - horário inicial/final
+  - perfil de carga
+  - estado do Argo antes/depois
+  - uso de CPU/memória dos nodes
+  - se houve `Pending`, `Degraded` ou throttling
