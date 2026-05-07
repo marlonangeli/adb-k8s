@@ -91,10 +91,14 @@ vc::load_defaults() {
   : "${VCLUSTER_SERVICE_TYPE:=LoadBalancer}"
   : "${VCLUSTER_INGRESS_CLASS:=native-oci}"
   : "${VCLUSTER_ENABLE_INGRESS:=0}"
+  : "${VCLUSTER_METRICS_SERVER_ENABLED:=1}"
   : "${VCLUSTER_HOST_TEMPLATE:=vcluster-[cluster].[slug].${BASE_DOMAIN:-adb.internal}}"
   : "${VCLUSTER_LOAD_BALANCER_TYPE:=nlb}"
   : "${VCLUSTER_LOAD_BALANCER_INTERNAL:=true}"
   : "${VCLUSTER_LB_SECURITY_RULE_MODE:=NSG}"
+  : "${METRICS_SERVER_NAMESPACE:=kube-system}"
+  : "${METRICS_SERVER_SERVICE_NAME:=metrics-server}"
+  : "${METRICS_SERVER_SERVICE_PORT:=443}"
   : "${SHARED_INTERPOLATION_HOST:=}"
   : "${VC_DISABLE_NETWORK_POLICIES:=0}"
 }
@@ -252,7 +256,9 @@ vc::values_for_profile() {
   local cp_request_cpu cp_request_memory cp_limit_cpu cp_limit_memory cp_replicas cp_k8s_version
   local syncer_request_cpu syncer_request_memory syncer_limit_cpu syncer_limit_memory
   local ingress_enabled="false"
+  local metrics_server_enabled="false"
   (( VCLUSTER_ENABLE_INGRESS )) && ingress_enabled="true"
+  [[ "${VCLUSTER_METRICS_SERVER_ENABLED}" == "1" ]] && metrics_server_enabled="true"
   if [[ -n "${host}" ]]; then
     vc::debug "Configurando host do vcluster para ${host}"
   fi
@@ -342,6 +348,21 @@ EOF
     host: ${host}
     spec:
       ingressClassName: ${VCLUSTER_INGRESS_CLASS}
+EOF
+    fi
+    if [[ "${metrics_server_enabled}" == "true" ]]; then
+      cat <<EOF
+integrations:
+  metricsServer:
+    enabled: true
+    nodes: true
+    pods: true
+    apiService:
+      service:
+        name: ${METRICS_SERVER_SERVICE_NAME}
+        namespace: ${METRICS_SERVER_NAMESPACE}
+        port: ${METRICS_SERVER_SERVICE_PORT}
+
 EOF
     fi
     cat <<EOF

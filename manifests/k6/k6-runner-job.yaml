@@ -1,0 +1,86 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ${K6_JOB_NAME}
+  namespace: ${K6_NAMESPACE}
+  labels:
+    app: k6-runner
+    adb.tcc/run-name: ${K6_JOB_NAME}
+    adb.tcc/target-service: ${K6_TARGET_SERVICE}
+spec:
+  ttlSecondsAfterFinished: ${K6_TTL_SECONDS}
+  backoffLimit: 0
+  template:
+    metadata:
+      labels:
+        app: k6-runner
+        adb.tcc/run-name: ${K6_JOB_NAME}
+        adb.tcc/target-service: ${K6_TARGET_SERVICE}
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: k6
+          image: ${K6_IMAGE}
+          imagePullPolicy: IfNotPresent
+          command:
+            - k6
+          args:
+            - run
+            - --summary-mode=full
+            - --summary-trend-stats=avg,min,med,max,p(90),p(95),p(99)
+            - --tag
+            - test_run=${K6_JOB_NAME}
+            - --tag
+            - target_service=${K6_TARGET_SERVICE}
+            - --out
+            - json=/results/metrics.json
+            - /scripts/${K6_SCRIPT}
+          env:
+            - name: K6_WEB_DASHBOARD
+              value: "true"
+            - name: K6_WEB_DASHBOARD_PORT
+              value: "-1"
+            - name: K6_WEB_DASHBOARD_EXPORT
+              value: /results/html-report.html
+            - name: K6_SUMMARY_EXPORT
+              value: /results/summary-export.json
+            - name: K6_RUN_NAME
+              value: ${K6_RUN_NAME_VALUE}
+            - name: K6_TARGET_SERVICE
+              value: ${K6_TARGET_SERVICE_VALUE}
+            - name: ${K6_TARGET_ENV_NAME}
+              value: ${K6_TARGET_ENV_VALUE}
+${K6_EXTRA_ENV_BLOCK}
+          resources:
+            requests:
+              cpu: ${K6_CPU_REQUEST}
+              memory: ${K6_MEMORY_REQUEST}
+            limits:
+              cpu: ${K6_CPU_LIMIT}
+              memory: ${K6_MEMORY_LIMIT}
+          volumeMounts:
+            - name: root-scripts
+              mountPath: /scripts
+            - name: lib-scripts
+              mountPath: /scripts/lib
+            - name: shared-scripts
+              mountPath: /scripts/shared-interpolation
+            - name: payload-scripts
+              mountPath: /scripts/shared-interpolation/payloads
+            - name: results
+              mountPath: /results
+      volumes:
+        - name: root-scripts
+          configMap:
+            name: ${K6_ROOT_CONFIGMAP}
+        - name: lib-scripts
+          configMap:
+            name: ${K6_LIB_CONFIGMAP}
+        - name: shared-scripts
+          configMap:
+            name: ${K6_SHARED_CONFIGMAP}
+        - name: payload-scripts
+          configMap:
+            name: ${K6_PAYLOAD_CONFIGMAP}
+        - name: results
+          emptyDir: {}

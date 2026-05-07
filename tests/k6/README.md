@@ -1,40 +1,85 @@
 # k6 Load Testing Playbooks
 
-Os testes de carga serão executados a partir de uma máquina externa para evitar
-impacto direto no cluster bare-metal. Utilize esta pasta como base para scripts
-k6 focados nos cenários do TCC.
+Os testes agora podem ser executados **dentro do cluster Kubernetes** usando o
+container oficial `grafana/k6:1.7.1`, mirando diretamente os **Services** reais
+do host cluster e dos vClusters. Isso evita o viés do `kubectl port-forward` e
+gera evidências melhores para o TCC.
 
 ## Pré-requisitos
 
-- k6 >= 0.48 instalado na estação de testes.
-- Acesso HTTPS/HTTP ao Ingress do cluster (mesmos hosts configurados para os
-  tenants e para a API de interpolação compartilhada).
-- Variáveis de ambiente exportadas com as URLs dos serviços:
-  - `TENANT_API_BASE_URL`
-  - `TENANT_API_TOKEN`
-  - `INTERPOLATION_BASE_URL`
-- Hosts e portas podem ser obtidos em `${STATE_DIR}/dynamic.env` após a
-  execução do `bin/90-vcluster.sh` e `bin/95-argocd.sh`.
+- `mise` configurado na raiz do workspace (`/home/ilegna/Work/tcc`).
+- `kubectl` funcional via `mise exec -- kubectl`.
+- vClusters `shared`, `abc` e `xyz` registrados e saudáveis.
+- Token válido para cenários autenticados da ADB API (`TENANT_API_TOKEN`), se o
+  endpoint exigir autenticação.
 
 ## Fluxo sugerido
 
-1. Copie os arquivos de `tests/k6/` para a estação de testes.
-2. Ajuste as variáveis no arquivo `.env.sample` (ou exporte manualmente).
-3. Execute um smoke test:
+1. Capture o baseline e atualize o dashboard do TCC:
    ```bash
-   k6 run tenant-smoke.js --vus 5 --duration 2m
+   mise run k6-prepare-incluster
    ```
-4. Para testes de estresse, utilize stages:
+2. Rode o teste de balanceamento da interpolação compartilhada:
    ```bash
-   k6 run tenant-ramp.js -e TARGET_VUS=200
+   mise run k6-shared-balance
+   ```
+3. Rode cenários funcionais/algorítmicos da API compartilhada:
+   ```bash
+   mise run k6-shared-root-smoke
+   mise run k6-shared-kriging
+   mise run k6-shared-idw-grid
+   mise run k6-shared-isi-grid
+   mise run k6-shared-isi-geostatistics
+   ```
+4. Rode smoke e ramp-up por tenant:
+   ```bash
+   mise run k6-tenant-abc-smoke
+   mise run k6-tenant-xyz-smoke
+   TARGET_VUS=50 mise run k6-tenant-abc-ramp
+   TARGET_VUS=50 mise run k6-tenant-xyz-ramp
    ```
 
 ## Estrutura
 
-- `tenant-smoke.js`: validação básica dos endpoints da API de dados (GET/POST).
-- `tenant-ramp.js`: cenário de rampa com métricas de latência/p95.
-- `shared-interpolation.js`: garante que o balanceamento `least_conn` está
-  respondendo dentro dos SLAs.
+- `tenant-smoke.js`: validação básica da API de dados por tenant.
+- `tenant-ramp.js`: cenário de rampa para HPA/latência dos tenants.
+- `shared-interpolation.js`: cenário principal de **balanceamento real** usando
+  `Connection: close` + métricas por `hostname` retornado em `/healthz`.
+- `shared-interpolation/*.js`: cenários algorítmicos da API compartilhada.
+- `lib/k6-common.js`: métricas customizadas, metadata e summaries padrão.
+
+## Runner in-cluster e artefatos
+
+Os `mise tasks` usam `scripts/k6-run-incluster.sh`, que:
+
+1. cria `ConfigMaps` com scripts e payloads;
+2. sobe um `Job` Kubernetes com `grafana/k6:1.7.1`;
+3. executa o cenário contra o **Service** real do cluster;
+4. coleta artefatos para a pasta de evidências.
+
+Cada execução salva, no mínimo:
+
+- `k6.log`
+- `metrics.json`
+- `summary-export.json`
+- `summary.json`
+- `summary.md`
+- `metadata.json`
+- `html-report.html`
+- `paper-report.md`
+- `paper-report.html`
+- `overview.csv`
+- `pod-distribution.csv`
+- snapshots `pre`/`post` de `kubectl top`, Applications e runtime
+
+## Serviços reais usados nos testes
+
+- Shared interpolation (host cluster):
+  - `http://adb-interpolation-api-x-processing-x-shared`
+- Tenant `abc` (host cluster):
+  - `http://adb-api-x-app-x-abc`
+- Tenant `xyz` (host cluster):
+  - `http://adb-api-x-app-x-xyz`
 
 ## Exportando kubeconfigs para observabilidade
 
@@ -55,14 +100,9 @@ kubectl -n monitoring get secret vcluster-${TENANT}-kubeconfig \
 3. No Hubble UI (`http://${HUBBLE_HOSTNAME}`), aplique filtros de namespace
    para validar se o tráfego entre tenants permanece bloqueado.
 
-## Melhorias recomendadas para os testes
+## Evidência para o TCC
 
-- Crie um cenário adicional usando o executor `ramping-arrival-rate` em um
-  novo script (ex.: `tenant-arrival-rate.js`) para controlar requisições por
-  segundo e simular picos reais.
-- Separe cenários de leitura e escrita em arquivos distintos, coletando métricas
-  de sucesso/erro individualmente.
-- Propague `X-Request-ID` nas requisições (k6 `http.batch`) e rastreie no
-  Grafana/Loki para correlacionar latência com logs.
-- Persista os resultados (`k6 run ... --out json=run.json`) e anexe ao TCC como
-  evidência dos SLAs cumpridos.
+- Use `paper-report.html` para gráficos/tabelas rápidas.
+- Use `paper-report.md` e `pod-distribution.csv` para anexos e tabelas do texto.
+- Use `html-report.html` (dashboard exportado pelo k6) como gráfico adicional.
+- Use os snapshots `pre`/`post` para correlacionar latência, HPA e consumo.

@@ -12,6 +12,14 @@ ensure_helm
 : "${PROMETHEUS_REQUEST_CPU:=100m}"
 : "${PROMETHEUS_SCRAPE_INTERVAL:=30s}"
 : "${PROMETHEUS_CLUSTER_LABEL:=oke}"
+: "${METRICS_SERVER_NAMESPACE:=kube-system}"
+: "${METRICS_SERVER_REQUEST_CPU:=50m}"
+: "${METRICS_SERVER_REQUEST_MEMORY:=96Mi}"
+: "${METRICS_SERVER_LIMIT_CPU:=200m}"
+: "${METRICS_SERVER_LIMIT_MEMORY:=256Mi}"
+: "${METRICS_SERVER_RESOLUTION:=30s}"
+: "${METRICS_SERVER_KUBELET_ADDRESS_TYPES:=InternalIP,ExternalIP,Hostname}"
+: "${METRICS_SERVER_KUBELET_INSECURE_TLS:=1}"
 : "${GRAFANA_ADMIN_USER:?defina GRAFANA_ADMIN_USER em secrets.env}"
 : "${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD em secrets.env}"
 
@@ -30,6 +38,7 @@ if [[ "${TLS_ENABLED:-0}" == "1" && "${PLATFORM_MODE:-baremetal}" != "oke" ]]; t
 fi
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo add metrics-server https://kubernetes-sigs.github.io/metrics-server/
 helm repo update
 
 chart_tmp=""
@@ -199,7 +208,34 @@ fi
 
 helm "${helm_args[@]}"
 
+metrics_server_values="${chart_tmp}/metrics-server-values.yaml"
+cat >"${metrics_server_values}" <<EOF
+resources:
+  requests:
+    cpu: ${METRICS_SERVER_REQUEST_CPU}
+    memory: ${METRICS_SERVER_REQUEST_MEMORY}
+  limits:
+    cpu: ${METRICS_SERVER_LIMIT_CPU}
+    memory: ${METRICS_SERVER_LIMIT_MEMORY}
+args:
+  - --kubelet-preferred-address-types=${METRICS_SERVER_KUBELET_ADDRESS_TYPES}
+  - --kubelet-use-node-status-port
+  - --metric-resolution=${METRICS_SERVER_RESOLUTION}
+EOF
+
+if [[ "${METRICS_SERVER_KUBELET_INSECURE_TLS}" == "1" ]]; then
+  cat >>"${metrics_server_values}" <<'EOF'
+  - --kubelet-insecure-tls
+EOF
+fi
+
+helm upgrade --debug -i metrics-server metrics-server/metrics-server \
+  -n "${METRICS_SERVER_NAMESPACE}" \
+  --create-namespace \
+  -f "${metrics_server_values}"
+
 log "validando rollout do kube-prometheus-stack"
+wait_rollout "${METRICS_SERVER_NAMESPACE}" deployment metrics-server
 wait_rollout monitoring deployment kube-prometheus-stack-operator
 wait_rollout monitoring deployment kube-prometheus-stack-grafana
 if kubectl -n monitoring get deployment kube-prometheus-stack-kube-state-metrics >/dev/null 2>&1; then

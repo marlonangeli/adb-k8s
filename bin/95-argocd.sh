@@ -24,12 +24,51 @@ global:
 server:
   extraArgs:
     - --insecure
+  resources:
+    requests:
+      cpu: 10m
+      memory: 96Mi
+    limits:
+      cpu: 150m
+      memory: 192Mi
   service:
     type: LoadBalancer
     annotations:
       oci.oraclecloud.com/load-balancer-type: "${ARGOCD_LB_TYPE}"
       oci-network-load-balancer.oraclecloud.com/internal: "${ARGOCD_LB_INTERNAL}"
       oci.oraclecloud.com/security-rule-management-mode: "${ARGOCD_LB_SECURITY_RULE_MODE}"
+controller:
+  resources:
+    requests:
+      cpu: 25m
+      memory: 256Mi
+    limits:
+      cpu: 250m
+      memory: 384Mi
+applicationSet:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 64Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+repoServer:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 96Mi
+    limits:
+      cpu: 150m
+      memory: 192Mi
+redis:
+  resources:
+    requests:
+      cpu: 10m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 64Mi
 configs:
   cm:
     timeout.reconciliation: 30s

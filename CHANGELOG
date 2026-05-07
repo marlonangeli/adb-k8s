@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-05-06
+- Testes k6 foram preparados para execução **in-cluster** via `grafana/k6:1.7.1`, com runner Kubernetes reutilizável (`scripts/k6-run-incluster.sh`, `manifests/k6/k6-runner-job.yaml`) e cenários atualizados para usar métricas customizadas, summaries padronizados e URLs reais de Services internos.
+- Adicionados `mise tasks` para baseline, balanceamento da interpolação compartilhada e smoke/ramp por tenant, reduzindo o uso de `localhost`/`port-forward` como caminho principal de validação.
+- Criado pipeline de artefatos para o TCC (`scripts/k6-artifact-report.py`, `scripts/k6-baseline-snapshot.sh`) gerando relatórios HTML/Markdown, tabelas CSV, distribuição por pod e snapshots `pre`/`post` do cluster.
+- O runner `scripts/k6-run-incluster.sh` passou a usar requests/limits mais leves por padrão (`20m/64Mi` → `200m/256Mi`) para caber melhor no cluster OKE com capacidade restrita durante ensaios de carga.
+- Reduzido o footprint base da `adb-api` dos tenants: HPA agora limita `maxReplicas` em `3`, os requests/limits do Deployment foram ajustados para um perfil mais leve e os `JAVA_OPTS` passaram a ser forçados para `-Xms256m -Xmx768m` via patch de ConfigMap por tenant, preservando a API em um envelope menor para OKE Always Free. (`../adb-api-3/k8s/base/deployment-adb-api.yaml`, `../adb-api-3/k8s/base/hpa-adb-api.yaml`, `../adb-api-3/k8s/base/configmap-app-settings.yaml`, `../adb-api-3/k8s/tenants/{abc,xyz}/configmap-java-opts-patch.yaml`)
+- `bin/95-argocd.sh` passou a instalar o Argo CD com requests/limits explícitos e menores para `controller`, `applicationSet`, `repoServer`, `server` e `redis`, alinhados ao consumo médio observado no cluster OKE.
+
+## 2026-05-05
+- Adicionado `scripts/port-forward-service-loop.sh` para manter `kubectl port-forward` em loop com reconexão automática após queda e encerramento limpo via `Ctrl+C`; `mise.toml` agora expõe tarefas dedicadas por serviço e atualiza a sessão tmux `port-forwards` para usar o modo resiliente.
+- Reorganizado o dashboard `grafana/tcc-pod-compute-dashboard.json` para destacar os painéis de HPA logo abaixo do uso de CPU/memória por pod, adicionando throughput de rede por pod (receive/transmit) antes do bloco de HPA e removendo os painéis redundantes `Running pod count over time` e `HPA refresh notes`; `scripts/grafana-upsert-tcc-dashboard.sh` também deixou de renderizar o bloco de notas removido.
+
 ## 2026-04-13
 - Observabilidade OKE agora expõe `PROMETHEUS_REQUEST_CPU` e `PROMETHEUS_SCRAPE_INTERVAL` em `env.sh`; o estágio `bin/70-observability.sh` passou a aplicar `scrapeInterval` configurável (default seguro em `30s`) para permitir testes com polling mais frequente sem voltar ao perfil de carga anterior.
 - O estágio `bin/80-longhorn.sh` agora explicita `LONGHORN_DEFAULT_REPLICA_COUNT`, cria/atualiza a StorageClass `longhorn-2` e a promove como default, evitando a limitação de imutabilidade do `StorageClass longhorn` original e alinhando novos volumes ao cluster OKE de 2 nós.

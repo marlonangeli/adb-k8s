@@ -54,17 +54,13 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 
 ## Testes de uso de recursos
 
-1. Gere carga com os scripts k6 (`tenant-ramp.js`, `shared-interpolation.js`).
+1. Gere carga com os scripts k6 **in-cluster** usando os tasks em `mise.toml`
+   (`k6-shared-balance`, `k6-tenant-abc-ramp`, `k6-tenant-xyz-ramp`, etc.).
 2. Antes de iniciar, capture baseline do cluster:
-   ```bash
-   cd /home/ilegna/Work/tcc/adb-k8s
-   source ./env.sh
-   source ./secrets.env
-
-   mise exec -- kubectl -n argocd get applications -A
-   mise exec -- kubectl top nodes
-   mise exec -- kubectl top pods -A
-   ```
+    ```bash
+   cd /home/ilegna/Work/tcc
+   mise run k6-prepare-incluster
+    ```
 2. Exporte o kubeconfig do tenant a partir do secret publicado em `monitoring`
    e configure a fonte de dados *Kubernetes* no Grafana:
    ```bash
@@ -90,11 +86,13 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 2. Observe o HPA com `kubectl --kubeconfig tenant-a.kubeconfig describe hpa
    adb-api` e confirme que o número de réplicas aumenta quando a utilização de
    CPU ultrapassa 70%.
-3. Valide o balanceamento pelo `kubectl --kubeconfig tenant-a.kubeconfig get
-   endpoints adb-api -o wide` e pelos logs dos pods (diferença de requisições).
-4. Para a API de interpolação compartilhada, monitore o Service
-   `adb-interpolation-api` no vCluster `shared` e acompanhe o tempo de resposta
-   via `shared-interpolation.js`.
+3. Valide o balanceamento real da API compartilhada com `mise run
+   k6-shared-balance`, que executa um Job k6 dentro do cluster contra o Service
+   `adb-interpolation-api-x-processing-x-shared` e gera `pod-distribution.csv`,
+   `paper-report.md` e `paper-report.html`.
+4. Para tenants, use `mise run k6-tenant-abc-ramp` / `mise run
+   k6-tenant-xyz-ramp` e correlacione os artefatos com `kubectl top`, HPA e
+   snapshots do Grafana.
 
 ## Testes de segurança entre tenants
 
@@ -154,6 +152,9 @@ heterogêneos). No contexto atual:
 
 - Registre os resultados (capturas do Grafana/Hubble, tabelas de consumo, logs)
   logo após os testes para facilitar a inclusão no TCC.
+- Priorize os artefatos exportados pelos runners k6 in-cluster (`html-report.html`,
+  `paper-report.html`, `paper-report.md`, `pod-distribution.csv`, snapshots
+  `pre`/`post`) como base para tabelas e figuras do trabalho.
 - Utilize `kubectl top` (metrics-server) como validação rápida e anexe o output
   junto às métricas de Grafana.
 - Para testes de resiliência, simule a queda de um pod (`kubectl delete pod`) e
