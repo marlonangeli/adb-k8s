@@ -38,6 +38,10 @@ gera evidências melhores para o TCC.
    TARGET_VUS=50 mise run k6-tenant-abc-ramp
    TARGET_VUS=50 mise run k6-tenant-xyz-ramp
    ```
+5. Se um Job antigo ficar no cluster, limpe antes de repetir o mesmo cenário:
+   ```bash
+   mise run k6-cleanup
+   ```
 
 ## Estrutura
 
@@ -55,22 +59,38 @@ Os `mise tasks` usam `scripts/k6-run-incluster.sh`, que:
 1. cria `ConfigMaps` com scripts e payloads;
 2. sobe um `Job` Kubernetes com `grafana/k6:1.7.1`;
 3. executa o cenário contra o **Service** real do cluster;
-4. coleta artefatos para a pasta de evidências.
+4. envia métricas k6 diretamente para o Prometheus via remote write;
+5. consulta o Prometheus para gerar relatórios locais na pasta de evidências.
 
 Cada execução salva, no mínimo:
 
 - `k6.log`
-- `metrics.json`
-- `summary-export.json`
-- `summary.json`
-- `summary.md`
-- `metadata.json`
-- `html-report.html`
 - `paper-report.md`
 - `paper-report.html`
 - `overview.csv`
 - `pod-distribution.csv`
-- snapshots `pre`/`post` de `kubectl top`, Applications e runtime
+- `report-index.json` com o `testid` usado no Prometheus
+- snapshots `pre`/`post` apenas do escopo testado (`shared`, `abc` ou `xyz`)
+
+O Prometheus recebe as séries com `testid=<timestamp>-<job>`, `test_run`,
+`target_service` e `target_scope`. Use esse `testid` para filtrar no Grafana.
+
+## Grafana / Prometheus
+
+O runner usa por padrão:
+
+```bash
+K6_PROMETHEUS_RW_SERVER_URL=http://kube-prometheus-stack-prometheus.monitoring.svc:9090/api/v1/write
+k6 run -o experimental-prometheus-rw --tag testid=<run-id> ...
+```
+
+Dashboard recomendado para importar no Grafana:
+
+- `19665` — **k6 Prometheus**, sem native histograms.
+
+Opcional, apenas se native histograms forem habilitados no Prometheus/k6:
+
+- `18030` — **k6 Prometheus (Native Histograms)**.
 
 ## Serviços reais usados nos testes
 

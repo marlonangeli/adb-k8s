@@ -31,9 +31,12 @@ spec:
             - --tag
             - test_run=${K6_JOB_NAME}
             - --tag
+            - testid=${K6_TEST_ID}
+            - --tag
             - target_service=${K6_TARGET_SERVICE}
-            - --out
-            - json=/results/metrics.json
+            - --tag
+            - target_scope=${K6_TARGET_SCOPE}
+${K6_OUTPUT_ARGS_BLOCK}
             - /scripts/${K6_SCRIPT}
           env:
             - name: K6_WEB_DASHBOARD

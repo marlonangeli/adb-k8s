@@ -12,7 +12,7 @@ const baseUrl = __ENV.TENANT_API_BASE_URL;
 const token = __ENV.TENANT_API_TOKEN;
 const service = __ENV.K6_TARGET_SERVICE || 'tenant-api';
 const scenario = 'tenant-smoke';
-const endpoint = '/records';
+const endpoint = '/input/hi';
 
 export const options = {
   vus: getVus(5),

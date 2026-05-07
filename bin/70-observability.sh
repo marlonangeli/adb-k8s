@@ -12,6 +12,7 @@ ensure_helm
 : "${PROMETHEUS_REQUEST_CPU:=100m}"
 : "${PROMETHEUS_SCRAPE_INTERVAL:=30s}"
 : "${PROMETHEUS_CLUSTER_LABEL:=oke}"
+: "${PROMETHEUS_REMOTE_WRITE_RECEIVER_ENABLED:=1}"
 : "${METRICS_SERVER_NAMESPACE:=kube-system}"
 : "${METRICS_SERVER_REQUEST_CPU:=50m}"
 : "${METRICS_SERVER_REQUEST_MEMORY:=96Mi}"
@@ -176,6 +177,7 @@ helm_args=(
   --set prometheus.prometheusSpec.resources.limits.memory=1.25Gi
   --set prometheus.prometheusSpec.retention=7d
   --set-string prometheus.prometheusSpec.externalLabels.cluster="${PROMETHEUS_CLUSTER_LABEL}"
+  --set prometheus.prometheusSpec.enableRemoteWriteReceiver="${PROMETHEUS_REMOTE_WRITE_RECEIVER_ENABLED}"
   --set kubeScheduler.enabled=false
   --set kubeControllerManager.enabled=false
   --set kubeEtcd.enabled=false

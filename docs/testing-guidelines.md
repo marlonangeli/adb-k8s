@@ -88,8 +88,9 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
    CPU ultrapassa 70%.
 3. Valide o balanceamento real da API compartilhada com `mise run
    k6-shared-balance`, que executa um Job k6 dentro do cluster contra o Service
-   `adb-interpolation-api-x-processing-x-shared` e gera `pod-distribution.csv`,
-   `paper-report.md` e `paper-report.html`.
+   `adb-interpolation-api-x-processing-x-shared`, envia métricas diretamente ao
+   Prometheus via remote write e gera `pod-distribution.csv`, `paper-report.md`
+   e `paper-report.html` a partir das consultas PromQL do `testid` da execução.
 4. Para tenants, use `mise run k6-tenant-abc-ramp` / `mise run
    k6-tenant-xyz-ramp` e correlacione os artefatos com `kubectl top`, HPA e
    snapshots do Grafana.
@@ -152,9 +153,10 @@ heterogêneos). No contexto atual:
 
 - Registre os resultados (capturas do Grafana/Hubble, tabelas de consumo, logs)
   logo após os testes para facilitar a inclusão no TCC.
-- Priorize os artefatos exportados pelos runners k6 in-cluster (`html-report.html`,
-  `paper-report.html`, `paper-report.md`, `pod-distribution.csv`, snapshots
-  `pre`/`post`) como base para tabelas e figuras do trabalho.
+- Priorize os artefatos exportados pelos runners k6 in-cluster
+  (`paper-report.html`, `paper-report.md`, `pod-distribution.csv`, snapshots
+  `pre`/`post`) e o dashboard Grafana `19665` filtrado pelo `testid` como base
+  para tabelas e figuras do trabalho.
 - Utilize `kubectl top` (metrics-server) como validação rápida e anexe o output
   junto às métricas de Grafana.
 - Para testes de resiliência, simule a queda de um pod (`kubectl delete pod`) e

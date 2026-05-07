@@ -6,6 +6,9 @@ import argparse
 import csv
 import html
 import json
+import time
+import urllib.parse
+import urllib.request
 from collections import defaultdict
 from pathlib import Path
 from statistics import mean
@@ -43,6 +46,234 @@ def load_metric_lines(path: Path) -> list[dict]:
             continue
         items.append(json.loads(line))
     return items
+
+
+def duration_to_seconds(value: str) -> int:
+    if not value:
+        return 1800
+
+    suffix = value[-1]
+    raw_number = value[:-1] if suffix in "smhd" else value
+    try:
+        number = float(raw_number)
+    except ValueError:
+        return 1800
+
+    multipliers = {"s": 1, "m": 60, "h": 3600, "d": 86400}
+    return int(number * multipliers.get(suffix, 1))
+
+
+def prometheus_api(base_url: str, path: str, params: dict) -> dict:
+    query = urllib.parse.urlencode(params, doseq=True)
+    url = f"{base_url.rstrip('/')}{path}?{query}"
+    with urllib.request.urlopen(url, timeout=10) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    if payload.get("status") != "success":
+        raise RuntimeError(payload)
+
+    return payload.get("data", {})
+
+
+def prometheus_query(base_url: str, query: str, evaluation_time: float | None = None) -> list[dict]:
+    params = {"query": query}
+    if evaluation_time:
+        params["time"] = f"{evaluation_time:.3f}"
+    return prometheus_api(base_url, "/api/v1/query", params).get("result", [])
+
+
+def prometheus_query_range(base_url: str, query: str, start: float, end: float, step: str = "5s") -> list[dict]:
+    return prometheus_api(
+        base_url,
+        "/api/v1/query_range",
+        {"query": query, "start": f"{start:.3f}", "end": f"{end:.3f}", "step": step},
+    ).get("result", [])
+
+
+def prometheus_series(base_url: str, match: str, start: float, end: float) -> list[dict]:
+    return prometheus_api(
+        base_url,
+        "/api/v1/series",
+        {"match[]": match, "start": f"{start:.3f}", "end": f"{end:.3f}"},
+    )
+
+
+def prom_label_value(value: str) -> str:
+    return json.dumps(value)
+
+
+def scalar_from_result(result: list[dict]) -> float | None:
+    if not result:
+        return None
+
+    try:
+        return float(result[0]["value"][1])
+    except (KeyError, IndexError, TypeError, ValueError):
+        return None
+
+
+def vector_map(result: list[dict], labels: list[str]) -> dict[tuple[str, ...], float]:
+    values: dict[tuple[str, ...], float] = {}
+    for item in result:
+        metric = item.get("metric", {})
+        key = tuple(metric.get(label, "") for label in labels)
+        try:
+            values[key] = float(item["value"][1])
+        except (KeyError, IndexError, TypeError, ValueError):
+            continue
+    return values
+
+
+def select_metric_name(metric_names: set[str], prefix: str, suffix: str) -> str | None:
+    candidates = sorted(name for name in metric_names if name.startswith(prefix) and name.endswith(suffix))
+    return candidates[0] if candidates else None
+
+
+def counter_total_and_rate(base_url: str, metric_name: str, selector: str, start_time: float, end_time: float) -> tuple[float | None, float | None]:
+    result = prometheus_query_range(base_url, f"sum({metric_name}{selector})", start_time, end_time)
+    if not result:
+        return None, None
+
+    values = []
+    for timestamp, raw_value in result[0].get("values", []):
+        try:
+            values.append((float(timestamp), float(raw_value)))
+        except (TypeError, ValueError):
+            continue
+
+    if not values:
+        return None, None
+
+    first_ts = values[0][0]
+    last_ts = values[-1][0]
+    total = max(value for _, value in values)
+    elapsed = max(last_ts - first_ts, 1)
+    return total, total / elapsed
+
+
+def collect_prometheus_summary(base_url: str, test_id: str, window: str) -> dict:
+    if not base_url or not test_id:
+        return {}
+
+    end_time = time.time()
+    start_time = end_time - duration_to_seconds(window)
+    selector = f'{{testid={prom_label_value(test_id)}}}'
+    metric_names = {
+        item.get("__name__", "")
+        for item in prometheus_series(base_url, f'{{__name__=~"k6_.*",testid={prom_label_value(test_id)}}}', start_time, end_time)
+    }
+
+    duration_prefix = "k6_http_req_duration"
+    avg_metric = select_metric_name(metric_names, duration_prefix, "_avg")
+    p95_metric = select_metric_name(metric_names, duration_prefix, "_p95")
+    p99_metric = select_metric_name(metric_names, duration_prefix, "_p99")
+    max_metric = select_metric_name(metric_names, duration_prefix, "_max")
+    request_count, request_rate = counter_total_and_rate(base_url, "k6_http_reqs_total", selector, start_time, end_time)
+
+    metrics = {
+        "http_reqs": {
+            "values": {
+                "count": request_count,
+                "rate": request_rate,
+            }
+        },
+        "http_req_failed": {
+            "values": {
+                "rate": scalar_from_result(prometheus_query(base_url, f"avg(avg_over_time(k6_http_req_failed_rate{selector}[{window}]))", end_time)),
+            }
+        },
+        "http_req_duration": {"values": {}},
+    }
+
+    for output_name, metric_name in {
+        "avg": avg_metric,
+        "p(95)": p95_metric,
+        "p(99)": p99_metric,
+        "max": max_metric,
+    }.items():
+        if metric_name:
+            metrics["http_req_duration"]["values"][output_name] = scalar_from_result(
+                prometheus_query(base_url, f"avg(avg_over_time({metric_name}{selector}[{window}]))", end_time)
+            )
+
+    return {"metrics": metrics, "prometheusMetricNames": sorted(metric_names)}
+
+
+def collect_prometheus_pod_rows(base_url: str, test_id: str, window: str) -> list[dict]:
+    if not base_url or not test_id:
+        return []
+
+    end_time = time.time()
+    start_time = end_time - duration_to_seconds(window)
+    label_names = ["service", "scenario", "endpoint", "pod"]
+    selector = f'{{testid={prom_label_value(test_id)}}}'
+    metric_names = {
+        item.get("__name__", "")
+        for item in prometheus_series(base_url, f'{{__name__=~"k6_pod_.*",testid={prom_label_value(test_id)}}}', start_time, end_time)
+    }
+
+    hits = vector_map(
+        prometheus_query(
+            base_url,
+            f"sum by (service,scenario,endpoint,pod) (max_over_time(k6_pod_hits_total{selector}[{window}]))",
+            end_time,
+        ),
+        label_names,
+    )
+
+    duration_prefix = "k6_pod_request_duration"
+    avg_metric = select_metric_name(metric_names, duration_prefix, "_avg")
+    p95_metric = select_metric_name(metric_names, duration_prefix, "_p95")
+    max_metric = select_metric_name(metric_names, duration_prefix, "_max")
+
+    def grouped_avg(metric_name: str | None) -> dict[tuple[str, ...], float]:
+        if not metric_name:
+            return {}
+        return vector_map(
+            prometheus_query(
+                base_url,
+                f"avg by (service,scenario,endpoint,pod) (avg_over_time({metric_name}{selector}[{window}]))",
+                end_time,
+            ),
+            label_names,
+        )
+
+    avg_values = grouped_avg(avg_metric)
+    p95_values = grouped_avg(p95_metric)
+    max_values = grouped_avg(max_metric)
+    success_values = vector_map(
+        prometheus_query(
+            base_url,
+            f"avg by (service,scenario,endpoint,pod) (avg_over_time(k6_pod_request_success_rate{selector}[{window}]))",
+            end_time,
+        ),
+        label_names,
+    )
+
+    totals_by_service: dict[str, float] = defaultdict(float)
+    for (service, _, _, _), count in hits.items():
+        totals_by_service[service] += count
+
+    rows = []
+    for key, count in sorted(hits.items()):
+        service, scenario, endpoint, pod = key
+        total = totals_by_service.get(service, 0) or 1
+        rows.append(
+            {
+                "service": service,
+                "scenario": scenario,
+                "endpoint": endpoint,
+                "pod": pod,
+                "hits": int(round(count)),
+                "share": count / total,
+                "avg_ms": avg_values.get(key),
+                "p95_ms": p95_values.get(key),
+                "max_ms": max_values.get(key),
+                "success_rate": success_values.get(key),
+            }
+        )
+
+    return rows
 
 
 def format_number(value, decimals: int = 2) -> str:
@@ -146,6 +377,8 @@ def build_markdown(metadata: dict, summary: dict, pod_rows: list[dict]) -> str:
         f"| Scenario | {metadata.get('scenario', 'n/a')} |",
         f"| Service | {metadata.get('service', 'n/a')} |",
         f"| Target URL | {metadata.get('targetUrl', 'n/a')} |",
+        f"| Prometheus testid | `{metadata.get('testId', 'n/a')}` |",
+        f"| Snapshot scope | {metadata.get('scope', 'n/a')} |",
         f"| Generated at | {metadata.get('generatedAt', 'n/a')} |",
         "",
         "## Overall Metrics",
@@ -161,6 +394,10 @@ def build_markdown(metadata: dict, summary: dict, pod_rows: list[dict]) -> str:
         f"| Failed request rate | {format_percentage(http_failed.get('rate'))} |",
         "",
     ]
+
+    prometheus_error = metadata.get("prometheus", {}).get("error")
+    if prometheus_error:
+        lines.extend(["> Prometheus query warning: " + prometheus_error, ""])
 
     if pod_rows:
         lines.extend(
@@ -276,7 +513,7 @@ def build_html(metadata: dict, summary: dict, pod_rows: list[dict]) -> str:
 <body>
   <h1>k6 TCC Evidence Report</h1>
   <p><strong>Run:</strong> {html.escape(metadata.get('runName', 'n/a'))} · <strong>Scenario:</strong> {html.escape(metadata.get('scenario', 'n/a'))} · <strong>Service:</strong> {html.escape(metadata.get('service', 'n/a'))}</p>
-  <p><strong>Target:</strong> <code>{html.escape(metadata.get('targetUrl', 'n/a'))}</code></p>
+  <p><strong>Target:</strong> <code>{html.escape(metadata.get('targetUrl', 'n/a'))}</code> · <strong>testid:</strong> <code>{html.escape(metadata.get('testId', 'n/a'))}</code></p>
   <div class=\"cards\">
     <div class=\"card\"><div class=\"label\">HTTP Requests</div><div class=\"value\">{http_requests.get('count', 'n/a')}</div></div>
     <div class=\"card\"><div class=\"label\">Avg Duration</div><div class=\"value\">{format_number(http_duration.get('avg'))} ms</div></div>
@@ -307,6 +544,13 @@ def build_html(metadata: dict, summary: dict, pod_rows: list[dict]) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Generate TCC-ready reports from k6 in-cluster artifacts.")
     parser.add_argument("--run-dir", required=True, help="Directory containing k6 artifacts")
+    parser.add_argument("--test-id", default="", help="k6 testid tag used in Prometheus")
+    parser.add_argument("--run-name", default="", help="k6 run name")
+    parser.add_argument("--service", default="", help="Target service name")
+    parser.add_argument("--target-url", default="", help="Target URL used by k6")
+    parser.add_argument("--scope", default="", help="Snapshot/test scope")
+    parser.add_argument("--prometheus-url", default="", help="Prometheus base URL for querying k6 remote-write metrics")
+    parser.add_argument("--prometheus-window", default="30m", help="PromQL range window for this run")
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -314,6 +558,33 @@ def main() -> None:
     metadata = load_json(run_dir / "metadata.json", {})
     metric_lines = load_metric_lines(run_dir / "metrics.json")
     pod_rows = collect_pod_rows(metric_lines)
+
+    prometheus_error = None
+    if args.prometheus_url and args.test_id:
+        try:
+            prometheus_summary = collect_prometheus_summary(args.prometheus_url, args.test_id, args.prometheus_window)
+            if prometheus_summary:
+                summary = prometheus_summary
+            prometheus_rows = collect_prometheus_pod_rows(args.prometheus_url, args.test_id, args.prometheus_window)
+            if prometheus_rows:
+                pod_rows = prometheus_rows
+        except Exception as error:  # noqa: BLE001 - report generation should preserve local artifacts on query failure.
+            prometheus_error = str(error)
+
+    metadata = {
+        "runName": args.run_name or metadata.get("runName", "n/a"),
+        "scenario": metadata.get("scenario", args.scope or "n/a"),
+        "service": args.service or metadata.get("service", "n/a"),
+        "targetUrl": args.target_url or metadata.get("targetUrl", "n/a"),
+        "testId": args.test_id or metadata.get("testId", "n/a"),
+        "scope": args.scope or metadata.get("scope", "n/a"),
+        "generatedAt": metadata.get("generatedAt") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "prometheus": {
+            "url": args.prometheus_url,
+            "window": args.prometheus_window,
+            "error": prometheus_error,
+        },
+    }
 
     write_csv(
         run_dir / "pod-distribution.csv",
@@ -340,6 +611,7 @@ def main() -> None:
                 "metadata": metadata,
                 "podDistributionRows": pod_rows,
                 "files": sorted(path.name for path in run_dir.iterdir() if path.is_file()),
+                "prometheusMetricNames": summary.get("prometheusMetricNames", []),
             },
             indent=2,
         ),

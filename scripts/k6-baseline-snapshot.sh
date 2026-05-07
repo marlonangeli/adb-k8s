@@ -6,13 +6,14 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 OUTPUT_DIR=""
 LABEL="snapshot"
+SCOPE="all"
 
 usage() {
   cat <<'EOF'
 Capture baseline Kubernetes snapshots for TCC k6 evidence.
 
 Usage:
-  scripts/k6-baseline-snapshot.sh --output-dir <dir> [--label <name>]
+  scripts/k6-baseline-snapshot.sh --output-dir <dir> [--label <name>] [--scope all|shared|abc|xyz|none]
 EOF
 }
 
@@ -24,6 +25,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --label)
       LABEL="$2"
+      shift 2
+      ;;
+    --scope)
+      SCOPE="$2"
       shift 2
       ;;
     -h|--help)
@@ -62,22 +67,64 @@ run_and_capture() {
   mise exec -- "$@" >"${output_file}" 2>&1
 }
 
-run_and_capture "${OUTPUT_DIR}/${LABEL}-argocd-applications.txt" kubectl -n argocd get applications -A -o wide
-run_and_capture "${OUTPUT_DIR}/${LABEL}-top-nodes.txt" kubectl top nodes
-run_and_capture "${OUTPUT_DIR}/${LABEL}-top-pods.txt" kubectl top pods -A
-run_and_capture "${OUTPUT_DIR}/${LABEL}-host-vcluster-services.txt" kubectl get svc -A
+capture_applications() {
+  local app_name="$1"
 
-if [[ -f "${ROOT_DIR}/.state/cluster-state/kubeconfig-shared.yaml" ]]; then
-  run_and_capture "${OUTPUT_DIR}/${LABEL}-shared-runtime.txt" kubectl --kubeconfig "${ROOT_DIR}/.state/cluster-state/kubeconfig-shared.yaml" -n processing get svc,pods,hpa,endpointslice -o wide
-fi
+  if [[ "${app_name}" == "all" ]]; then
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-argocd-applications.txt" kubectl -n argocd get applications -A -o wide
+  else
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-argocd-${app_name}.txt" kubectl -n argocd get application "${app_name}" -o wide
+  fi
+}
 
-if [[ -f "${ROOT_DIR}/.state/cluster-state/kubeconfig-abc.yaml" ]]; then
-  run_and_capture "${OUTPUT_DIR}/${LABEL}-abc-runtime.txt" kubectl --kubeconfig "${ROOT_DIR}/.state/cluster-state/kubeconfig-abc.yaml" -n app get svc,pods,hpa -o wide
-fi
+capture_host_namespace() {
+  local host_namespace="$1"
 
-if [[ -f "${ROOT_DIR}/.state/cluster-state/kubeconfig-xyz.yaml" ]]; then
-  run_and_capture "${OUTPUT_DIR}/${LABEL}-xyz-runtime.txt" kubectl --kubeconfig "${ROOT_DIR}/.state/cluster-state/kubeconfig-xyz.yaml" -n app get svc,pods,hpa -o wide
-fi
+  run_and_capture "${OUTPUT_DIR}/${LABEL}-${host_namespace}-top-pods.txt" kubectl top pods -n "${host_namespace}"
+  run_and_capture "${OUTPUT_DIR}/${LABEL}-${host_namespace}-services.txt" kubectl -n "${host_namespace}" get svc,pods -o wide
+}
+
+capture_vcluster_runtime() {
+  local cluster="$1"
+  local namespace="$2"
+  local extra_resources="$3"
+  local kubeconfig="${ROOT_DIR}/.state/cluster-state/kubeconfig-${cluster}.yaml"
+
+  if [[ -f "${kubeconfig}" ]]; then
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-${cluster}-runtime.txt" kubectl --kubeconfig "${kubeconfig}" -n "${namespace}" get "${extra_resources}" -o wide
+  fi
+}
+
+case "${SCOPE}" in
+  all)
+    capture_applications all
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-top-nodes.txt" kubectl top nodes
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-top-pods.txt" kubectl top pods -A
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-host-vcluster-services.txt" kubectl get svc -A
+    capture_vcluster_runtime shared processing svc,pods,hpa,endpointslice
+    capture_vcluster_runtime abc app svc,pods,hpa
+    capture_vcluster_runtime xyz app svc,pods,hpa
+    ;;
+  shared)
+    capture_applications shared-interpolation
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-top-nodes.txt" kubectl top nodes
+    capture_host_namespace vcluster-shared
+    capture_vcluster_runtime shared processing svc,pods,hpa,endpointslice
+    ;;
+  abc|xyz)
+    capture_applications "tenant-${SCOPE}-adb-api"
+    run_and_capture "${OUTPUT_DIR}/${LABEL}-top-nodes.txt" kubectl top nodes
+    capture_host_namespace "vcluster-${SCOPE}"
+    capture_vcluster_runtime "${SCOPE}" app svc,pods,hpa
+    ;;
+  none)
+    ;;
+  *)
+    echo "Unknown scope: ${SCOPE}" >&2
+    usage >&2
+    exit 1
+    ;;
+esac
 
 if [[ -x "${ROOT_DIR}/scripts/collect-vcluster-hpa-history.sh" ]]; then
   "${ROOT_DIR}/scripts/collect-vcluster-hpa-history.sh" --once >/dev/null 2>&1 || true
