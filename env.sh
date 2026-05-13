@@ -84,7 +84,7 @@ fi
 # Tenants / vCluster
 
 # tenant configurado em `adb-api-3/k8s/tenants`
-export TENANTS="${TENANTS:-abc xyz}"
+export TENANTS="${TENANTS:-abc}"
 export TENANT_NAMESPACE_PREFIX="${TENANT_NAMESPACE_PREFIX:-vcluster-}"
 export TENANT_TARGET_NAMESPACE="${TENANT_TARGET_NAMESPACE:-app}"
 export TENANT_APP_NAMESPACE="${TENANT_APP_NAMESPACE:-${TENANT_TARGET_NAMESPACE}}"
