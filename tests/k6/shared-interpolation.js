@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { check } from 'k6';
 import {
+  createEndpointTags,
   createHttpParams,
   createSummaryHandler,
   getDuration,
@@ -34,6 +35,7 @@ thresholds[`pod_hits{service:${service},scenario:${scenario}}`] = ['count>0'];
 
 export const options = {
   noConnectionReuse: true,
+  systemTags: ['status', 'method', 'name', 'group', 'check', 'scenario', 'expected_response'],
   scenarios: {
     balance: {
       executor: 'constant-arrival-rate',
@@ -48,7 +50,10 @@ export const options = {
 };
 
 export default function () {
-  const response = http.get(`${interpolationUrl}${endpoint}`, createHttpParams(service, { closeConnection: true }));
+  const response = http.get(`${interpolationUrl}${endpoint}`, createHttpParams(service, {
+    closeConnection: true,
+    tags: createEndpointTags('GET', endpoint),
+  }));
   const { payload, pod } = recordResponse({
     response,
     service,

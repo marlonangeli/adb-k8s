@@ -91,9 +91,17 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
    `adb-interpolation-api-x-processing-x-shared`, envia métricas diretamente ao
    Prometheus via remote write e gera `pod-distribution.csv`, `paper-report.md`
    e `paper-report.html` a partir das consultas PromQL do `testid` da execução.
-4. Para tenants, use `mise run k6-tenant-abc-ramp` / `mise run
-   k6-tenant-xyz-ramp` e correlacione os artefatos com `kubectl top`, HPA e
-   snapshots do Grafana.
+4. Para **Escalabilidade** da API compartilhada, use
+   `TARGET_VUS=30 mise run k6-shared-escalabilidade` primeiro. O cenário aumenta
+   VUs em estágios, usa `/kriging` para gerar carga de CPU e consulta `/healthz`
+   para registrar distribuição por hostname; ele grava evidências em
+   `evidencias/escalabilidade/shared-interpolation` e deve ser correlacionado com
+   HPA/réplicas do Deployment `adb-interpolation-api` no namespace `processing`.
+5. Para tenants, use primeiro os smokes (`/input/hi`) e depois `mise run
+   k6-tenant-abc-ramp` / `mise run k6-tenant-xyz-ramp`, que executam bootstrap
+   real (`POST /person` + `POST /auth`) e CRUD autenticado leve de `company` e
+   `employee`; correlacione os artefatos com `kubectl top`, HPA e snapshots do
+   Grafana.
 
 ## Testes de segurança entre tenants
 

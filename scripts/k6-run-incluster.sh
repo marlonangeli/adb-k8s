@@ -13,10 +13,10 @@ TARGET_ENV_VALUE=""
 TARGET_SERVICE=""
 TTL_SECONDS="86400"
 K6_IMAGE="grafana/k6:1.7.1"
-K6_CPU_REQUEST="20m"
-K6_MEMORY_REQUEST="64Mi"
-K6_CPU_LIMIT="200m"
-K6_MEMORY_LIMIT="256Mi"
+K6_CPU_REQUEST="${K6_CPU_REQUEST:-20m}"
+K6_MEMORY_REQUEST="${K6_MEMORY_REQUEST:-96Mi}"
+K6_CPU_LIMIT="${K6_CPU_LIMIT:-300m}"
+K6_MEMORY_LIMIT="${K6_MEMORY_LIMIT:-512Mi}"
 WAIT_TIMEOUT="30m"
 SNAPSHOT_SCOPE=""
 PROMETHEUS_QUERY_WINDOW="${K6_PROMETHEUS_QUERY_WINDOW:-30m}"
@@ -276,6 +276,7 @@ import sys
 
 payload = json.load(sys.stdin)
 sensitive_terms = ("TOKEN", "PASSWORD", "SECRET", "KEY")
+payload.get("metadata", {}).get("annotations", {}).pop("kubectl.kubernetes.io/last-applied-configuration", None)
 
 for container in payload.get("spec", {}).get("template", {}).get("spec", {}).get("containers", []):
     for env in container.get("env", []):
@@ -285,6 +286,21 @@ for container in payload.get("spec", {}).get("template", {}).get("spec", {}).get
 
 print(json.dumps(payload, indent=2))
 ' >"${run_dir}/job.json"
+}
+
+redact_sensitive_text() {
+  python3 -c '
+import re
+import sys
+
+sensitive_terms = ("TOKEN", "PASSWORD", "SECRET", "KEY")
+
+for line in sys.stdin:
+    stripped = line.strip()
+    if any(term in stripped.upper() for term in sensitive_terms) and ":" in line:
+        line = re.sub(r":\s+.*$", ": REDACTED\n", line)
+    sys.stdout.write(line)
+'
 }
 
 timestamp="$(date -u +%Y%m%dT%H%M%SZ)"
@@ -318,6 +334,7 @@ mise exec -- kubectl -n "${NAMESPACE}" create configmap "${K6_SHARED_CONFIGMAP}"
   --from-file=idw-grid.js="${ROOT_DIR}/tests/k6/shared-interpolation/idw-grid.js" \
   --from-file=isi-grid.js="${ROOT_DIR}/tests/k6/shared-interpolation/isi-grid.js" \
   --from-file=isi-geostatistics.js="${ROOT_DIR}/tests/k6/shared-interpolation/isi-geostatistics.js" \
+  --from-file=escalabilidade.js="${ROOT_DIR}/tests/k6/shared-interpolation/escalabilidade.js" \
   --dry-run=client -o yaml | mise exec -- kubectl apply -f - >/dev/null
 
 mise exec -- kubectl -n "${NAMESPACE}" create configmap "${K6_PAYLOAD_CONFIGMAP}" \
@@ -384,7 +401,7 @@ set -e
 pod_name="$(mise exec -- kubectl -n "${NAMESPACE}" get pods -l "job-name=${JOB_NAME}" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)"
 if [[ -n "${pod_name}" ]]; then
   mise exec -- kubectl -n "${NAMESPACE}" logs "${pod_name}" >"${run_dir}/k6.log" 2>&1 || true
-  mise exec -- kubectl -n "${NAMESPACE}" describe pod "${pod_name}" >"${run_dir}/k6-pod-describe.txt" 2>&1 || true
+  mise exec -- kubectl -n "${NAMESPACE}" describe pod "${pod_name}" 2>&1 | redact_sensitive_text >"${run_dir}/k6-pod-describe.txt" || true
 fi
 mise exec -- kubectl -n "${NAMESPACE}" get pods -l "job-name=${JOB_NAME}" -o wide >"${run_dir}/pods.txt" 2>&1 || true
 save_redacted_job || true

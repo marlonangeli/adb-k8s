@@ -2,6 +2,7 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 
 export const scenarioRequests = new Counter('scenario_requests');
 export const scenarioRequestDuration = new Trend('scenario_request_duration', true);
+export const scenarioRequestWaiting = new Trend('scenario_request_waiting', true);
 export const scenarioSuccess = new Rate('scenario_success');
 export const hostnameSeen = new Rate('hostname_seen');
 export const podHits = new Counter('pod_hits');
@@ -162,6 +163,12 @@ export const getPreAllocatedVus = fallback => toNumber(__ENV.K6_PREALLOCATED_VUS
 
 export const getMaxVus = fallback => toNumber(__ENV.K6_MAX_VUS, fallback);
 
+export const createEndpointTags = (method, endpoint, extra = {}) => ({
+  ...extra,
+  endpoint,
+  name: `${method} ${endpoint}`,
+});
+
 export const createHttpParams = (service, extra = {}) => {
   const baseHeaders = {
     'X-K6-Run-Name': __ENV.K6_RUN_NAME || fallbackRunName,
@@ -196,6 +203,7 @@ export const recordResponse = ({ response, service, scenario, endpoint }) => {
 
   scenarioRequests.add(1, tags);
   scenarioRequestDuration.add(response.timings.duration, tags);
+  scenarioRequestWaiting.add(response.timings.waiting, tags);
   scenarioSuccess.add(ok, tags);
   hostnameSeen.add(Boolean(pod), tags);
 

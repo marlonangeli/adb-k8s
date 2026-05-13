@@ -1,6 +1,7 @@
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import {
+  createEndpointTags,
   createHttpParams,
   createSummaryHandler,
   getDuration,
@@ -14,6 +15,7 @@ const scenario = 'shared-kriging';
 const endpoint = '/kriging';
 
 export const options = {
+  systemTags: ['status', 'method', 'name', 'group', 'check', 'scenario', 'expected_response'],
   vus: getVus(5),
   duration: getDuration('1m'),
   thresholds: {
@@ -37,6 +39,7 @@ export default function () {
       headers: {
         'Content-Type': 'application/json',
       },
+      tags: createEndpointTags('POST', endpoint),
     })
   );
 

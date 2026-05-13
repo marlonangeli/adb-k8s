@@ -1,6 +1,7 @@
 import http from "k6/http";
 import { check } from "k6";
 import {
+  createEndpointTags,
   createHttpParams,
   createSummaryHandler,
   getDuration,
@@ -17,6 +18,7 @@ const endpoint = "/";
 
 export const options = {
   noConnectionReuse: true,
+  systemTags: ["status", "method", "name", "group", "check", "scenario", "expected_response"],
   vus: getVus(2),
   duration: getDuration("1m"),
   thresholds: {
@@ -34,7 +36,10 @@ if (!interpolationUrl) {
 export default function () {
   const response = http.get(
     `${interpolationUrl}${endpoint}`,
-    createHttpParams(service, { closeConnection: true })
+    createHttpParams(service, {
+      closeConnection: true,
+      tags: createEndpointTags("GET", endpoint),
+    })
   );
 
   const { payload, pod } = recordResponse({

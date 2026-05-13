@@ -23,7 +23,12 @@ gera evidências melhores para o TCC.
    ```bash
    mise run k6-shared-balance
    ```
-3. Rode cenários funcionais/algorítmicos da API compartilhada:
+3. Rode a rampa de **Escalabilidade** da interpolação compartilhada quando quiser
+   evidenciar crescimento de carga e HPA:
+   ```bash
+   TARGET_VUS=30 mise run k6-shared-escalabilidade
+   ```
+4. Rode cenários funcionais/algorítmicos da API compartilhada:
    ```bash
    mise run k6-shared-root-smoke
    mise run k6-shared-kriging
@@ -31,24 +36,29 @@ gera evidências melhores para o TCC.
    mise run k6-shared-isi-grid
    mise run k6-shared-isi-geostatistics
    ```
-4. Rode smoke e ramp-up por tenant:
+5. Rode smoke e ramp-up por tenant:
    ```bash
    mise run k6-tenant-abc-smoke
    mise run k6-tenant-xyz-smoke
    TARGET_VUS=50 mise run k6-tenant-abc-ramp
    TARGET_VUS=50 mise run k6-tenant-xyz-ramp
    ```
-5. Se um Job antigo ficar no cluster, limpe antes de repetir o mesmo cenário:
+6. Se um Job antigo ficar no cluster, limpe antes de repetir o mesmo cenário:
    ```bash
    mise run k6-cleanup
    ```
 
 ## Estrutura
 
-- `tenant-smoke.js`: validação básica da API de dados por tenant.
-- `tenant-ramp.js`: cenário de rampa para HPA/latência dos tenants.
+- `tenant-smoke.js`: validação básica da API de dados por tenant usando
+  `GET /input/hi` e status `200`.
+- `tenant-ramp.js`: cenário de rampa com bootstrap real (`POST /person` +
+  `POST /auth`) e CRUD autenticado leve de `company` e `employee`.
 - `shared-interpolation.js`: cenário principal de **balanceamento real** usando
   `Connection: close` + métricas por `hostname` retornado em `/healthz`.
+- `shared-interpolation/escalabilidade.js`: rampa de VUs da API compartilhada,
+  usando endpoint algorítmico para gerar CPU e `/healthz` para evidenciar
+  distribuição entre pods escalados.
 - `shared-interpolation/*.js`: cenários algorítmicos da API compartilhada.
 - `lib/k6-common.js`: métricas customizadas, metadata e summaries padrão.
 
@@ -74,6 +84,34 @@ Cada execução salva, no mínimo:
 
 O Prometheus recebe as séries com `testid=<timestamp>-<job>`, `test_run`,
 `target_service` e `target_scope`. Use esse `testid` para filtrar no Grafana.
+
+## Escalabilidade compartilhada
+
+Execute com carga conservadora primeiro:
+
+```bash
+cd /home/ilegna/Work/tcc
+TARGET_VUS=30 mise run k6-shared-escalabilidade
+```
+
+Parâmetros ajustáveis sem editar o script:
+
+```bash
+TARGET_VUS=50 \
+K6_RAMP_STAGE_1_DURATION=2m \
+K6_RAMP_STAGE_2_DURATION=3m \
+K6_HOLD_DURATION=5m \
+K6_RAMP_DOWN_DURATION=2m \
+K6_SLEEP_SECONDS=0.5 \
+INTERPOLATION_SCALABILITY_ENDPOINT=/kriging \
+INTERPOLATION_SCALABILITY_PAYLOAD=./payloads/kriging.json \
+INTERPOLATION_SCALABILITY_EXPECTED_STATUS=201 \
+mise run k6-shared-escalabilidade
+```
+
+Use `report-index.json` para obter o `testid`; filtre o dashboard Grafana `19665`
+por esse valor e correlacione a janela com HPA/réplicas do Deployment
+`adb-interpolation-api` no namespace `processing`.
 
 ## Grafana / Prometheus
 
