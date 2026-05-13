@@ -3,9 +3,12 @@ import { check, sleep } from 'k6';
 import {
   createEndpointTags,
   createHttpParams,
+  createRscriptResponseCallback,
   createSummaryHandler,
   getTargetVus,
+  isExpectedRscriptOutcome,
   recordResponse,
+  recordRscriptResponse,
 } from '../lib/k6-common.js';
 
 const interpolationUrl = __ENV.INTERPOLATION_BASE_URL;
@@ -71,18 +74,22 @@ export default function () {
     payload,
     requestParams('POST', loadEndpoint, {
       headers: { 'Content-Type': 'application/json' },
+      responseCallback: createRscriptResponseCallback(expectedStatus),
     })
   );
 
-  recordResponse({
+  recordRscriptResponse({
     response: loadResponse,
     service,
     scenario,
     endpoint: loadEndpoint,
+    expectedStatus,
   });
 
   check(loadResponse, {
-    [`${loadEndpoint} status is ${expectedStatus}`]: response => response.status === expectedStatus,
+    [`${loadEndpoint} status is ${expectedStatus} or expected Rscript backpressure`]: response => (
+      isExpectedRscriptOutcome(response, expectedStatus)
+    ),
   });
 
   const healthResponse = http.get(`${interpolationUrl}${healthEndpoint}`, requestParams('GET', healthEndpoint, {

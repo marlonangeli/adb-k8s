@@ -3,10 +3,13 @@ import { check, sleep } from "k6";
 import {
   createEndpointTags,
   createHttpParams,
+  createRscriptResponseCallback,
   createSummaryHandler,
   getDuration,
   getVus,
-  recordResponse,
+  isExpectedRscriptOutcome,
+  isRscriptBackpressure,
+  recordRscriptResponse,
 } from "../lib/k6-common.js";
 
 const interpolationUrl = __ENV.INTERPOLATION_BASE_URL;
@@ -39,11 +42,12 @@ export default function () {
       headers: {
         "Content-Type": "application/json",
       },
+      responseCallback: createRscriptResponseCallback(),
       tags: createEndpointTags("POST", endpoint),
     })
   );
 
-  recordResponse({
+  recordRscriptResponse({
     response,
     service,
     scenario,
@@ -51,8 +55,8 @@ export default function () {
   });
 
   check(response, {
-    "status is 201": (r) => r.status === 201,
-    "response has body": (r) => !!r.body,
+    "status is 201 or expected Rscript backpressure": (r) => isExpectedRscriptOutcome(r),
+    "response has body when completed": (r) => isRscriptBackpressure(r) || !!r.body,
   });
 
   sleep(1);
