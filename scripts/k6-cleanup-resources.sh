@@ -4,7 +4,7 @@ set -Eeuo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
-declare -a NAMESPACES=(vcluster-shared vcluster-abc vcluster-xyz)
+declare -a NAMESPACES=(vcluster-shared vcluster-abc)
 declare -a CUSTOM_NAMESPACES=()
 
 usage() {

@@ -13,7 +13,7 @@ usage() {
 Capture baseline Kubernetes snapshots for TCC k6 evidence.
 
 Usage:
-  scripts/k6-baseline-snapshot.sh --output-dir <dir> [--label <name>] [--scope all|shared|abc|xyz|none]
+  scripts/k6-baseline-snapshot.sh --output-dir <dir> [--label <name>] [--scope all|shared|abc|none]
 EOF
 }
 
@@ -103,7 +103,6 @@ case "${SCOPE}" in
     run_and_capture "${OUTPUT_DIR}/${LABEL}-host-vcluster-services.txt" kubectl get svc -A
     capture_vcluster_runtime shared processing svc,pods,hpa,endpointslice
     capture_vcluster_runtime abc app svc,pods,hpa
-    capture_vcluster_runtime xyz app svc,pods,hpa
     ;;
   shared)
     capture_applications shared-interpolation
@@ -111,7 +110,7 @@ case "${SCOPE}" in
     capture_host_namespace vcluster-shared
     capture_vcluster_runtime shared processing svc,pods,hpa,endpointslice
     ;;
-  abc|xyz)
+  abc)
     capture_applications "tenant-${SCOPE}-adb-api"
     run_and_capture "${OUTPUT_DIR}/${LABEL}-top-nodes.txt" kubectl top nodes
     capture_host_namespace "vcluster-${SCOPE}"

@@ -9,7 +9,7 @@ gera evidências melhores para o TCC.
 
 - `mise` configurado na raiz do workspace (`/home/ilegna/Work/tcc`).
 - `kubectl` funcional via `mise exec -- kubectl`.
-- vClusters `shared`, `abc` e `xyz` registrados e saudáveis.
+- vClusters `shared` e `abc` registrados e saudáveis.
 - Token válido para cenários autenticados da ADB API (`TENANT_API_TOKEN`), se o
   endpoint exigir autenticação.
 
@@ -37,12 +37,10 @@ gera evidências melhores para o TCC.
    mise run k6-shared-isi-geostatistics
    ```
 5. Rode smoke e ramp-up por tenant:
-   ```bash
-   mise run k6-tenant-abc-smoke
-   mise run k6-tenant-xyz-smoke
-   TARGET_VUS=50 mise run k6-tenant-abc-ramp
-   TARGET_VUS=50 mise run k6-tenant-xyz-ramp
-   ```
+    ```bash
+    mise run k6-tenant-abc-smoke
+    TARGET_VUS=50 mise run k6-tenant-abc-ramp
+    ```
 6. Se um Job antigo ficar no cluster, limpe antes de repetir o mesmo cenário:
    ```bash
    mise run k6-cleanup
@@ -80,7 +78,7 @@ Cada execução salva, no mínimo:
 - `overview.csv`
 - `pod-distribution.csv`
 - `report-index.json` com o `testid` usado no Prometheus
-- snapshots `pre`/`post` apenas do escopo testado (`shared`, `abc` ou `xyz`)
+- snapshots `pre`/`post` apenas do escopo testado (`shared` ou `abc`)
 
 O Prometheus recebe as séries com `testid=<timestamp>-<job>`, `test_run`,
 `target_service` e `target_scope`. Use esse `testid` para filtrar no Grafana.
@@ -113,6 +111,31 @@ Use `report-index.json` para obter o `testid`; filtre o dashboard Grafana `19665
 por esse valor e correlacione a janela com HPA/réplicas do Deployment
 `adb-interpolation-api` no namespace `processing`.
 
+### Pausar Argo CD durante evidências de HPA
+
+Quando o ensaio de escalabilidade exigir alteração temporária de réplicas,
+imagem, limites ou HPA, pause a sincronização automática da Application
+`shared-interpolation` antes da rampa. Isso evita que o Argo CD reverta o estado
+manual enquanto o k6 gera carga.
+
+```bash
+kubectl -n argocd patch application shared-interpolation --type merge \
+  -p '{"spec":{"syncPolicy":null}}'
+kubectl -n argocd get application shared-interpolation \
+  -o jsonpath='{.spec.syncPolicy}{"\n"}'
+```
+
+Depois de salvar os artefatos e screenshots, restaure o GitOps padrão:
+
+```bash
+kubectl -n argocd patch application shared-interpolation --type merge \
+  -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true},"syncOptions":["CreateNamespace=true"]}}}'
+kubectl -n argocd get application shared-interpolation
+```
+
+Não deixe a Application pausada após o teste; registre no relatório o horário em
+que o pause/restore foi aplicado.
+
 ## Grafana / Prometheus
 
 O runner usa por padrão:
@@ -136,8 +159,6 @@ Opcional, apenas se native histograms forem habilitados no Prometheus/k6:
   - `http://adb-interpolation-api-x-processing-x-shared`
 - Tenant `abc` (host cluster):
   - `http://adb-api-x-app-x-abc`
-- Tenant `xyz` (host cluster):
-  - `http://adb-api-x-app-x-xyz`
 
 ## Exportando kubeconfigs para observabilidade
 

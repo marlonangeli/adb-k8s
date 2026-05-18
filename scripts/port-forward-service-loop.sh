@@ -16,7 +16,6 @@ Usage:
 Examples:
   scripts/port-forward-service-loop.sh shared
   scripts/port-forward-service-loop.sh abc
-  scripts/port-forward-service-loop.sh xyz 4002
 
 Environment:
   PORT_FORWARD_RETRY_DELAY_SECONDS   Delay before reconnect (default: 2)

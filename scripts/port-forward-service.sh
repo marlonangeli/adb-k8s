@@ -20,12 +20,10 @@ Usage:
 Services:
   shared   processing/adb-interpolation-api  -> default local port 3000
   abc      app/adb-api                       -> default local port 3001
-  xyz      app/adb-api                       -> default local port 3002
 
 Examples:
   scripts/port-forward-service.sh shared
   scripts/port-forward-service.sh abc
-  scripts/port-forward-service.sh xyz 4002
 
 Notes:
   - Uses kubeconfigs from .state/cluster-state
@@ -64,13 +62,6 @@ resolve_target() {
       TARGET_NAMESPACE="app"
       TARGET_SERVICE="adb-api"
       LOCAL_PORT="${2:-3001}"
-      REMOTE_PORT="80"
-      ;;
-    xyz)
-      KUBECONFIG_PATH="${STATE_DIR}/kubeconfig-xyz.yaml"
-      TARGET_NAMESPACE="app"
-      TARGET_SERVICE="adb-api"
-      LOCAL_PORT="${2:-3002}"
       REMOTE_PORT="80"
       ;;
     -h|--help|help)

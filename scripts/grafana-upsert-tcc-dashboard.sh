@@ -7,7 +7,6 @@ STATE_DIR="${STATE_DIR:-${ROOT_DIR}/.state/cluster-state}"
 DASHBOARD_FILE="${DASHBOARD_FILE:-${ROOT_DIR}/grafana/tcc-pod-compute-dashboard.json}"
 GRAFANA_URL="${GRAFANA_URL:-http://144.22.151.206}"
 ABC_KUBECONFIG="${ABC_KUBECONFIG:-${STATE_DIR}/kubeconfig-abc.yaml}"
-XYZ_KUBECONFIG="${XYZ_KUBECONFIG:-${STATE_DIR}/kubeconfig-xyz.yaml}"
 SHARED_KUBECONFIG="${SHARED_KUBECONFIG:-${STATE_DIR}/kubeconfig-shared.yaml}"
 OBS_DIR="${OBS_DIR:-${STATE_DIR}/observability}"
 
@@ -37,16 +36,40 @@ if [[ ! -f "${DASHBOARD_FILE}" ]]; then
   exit 1
 fi
 
-hpa_snapshot_json="$(python - <<'PY' "${ABC_KUBECONFIG}" "${XYZ_KUBECONFIG}" "${SHARED_KUBECONFIG}"
+append_hpa_snapshot_spec() {
+  local -n specs_ref="$1"
+  local cluster="$2"
+  local kubeconfig="$3"
+  local namespace="$4"
+  local hpa_name="$5"
+
+  if [[ -f "${kubeconfig}" ]]; then
+    specs_ref+=("${cluster}|${kubeconfig}|${namespace}|${hpa_name}")
+    return
+  fi
+
+  echo "WARN: skipping ${cluster}; kubeconfig not found: ${kubeconfig}" >&2
+}
+
+hpa_snapshot_specs=()
+append_hpa_snapshot_spec hpa_snapshot_specs abc "${ABC_KUBECONFIG}" app adb-api
+append_hpa_snapshot_spec hpa_snapshot_specs shared "${SHARED_KUBECONFIG}" processing adb-interpolation-api
+
+if ((${#hpa_snapshot_specs[@]} == 0)); then
+  echo "ERROR: no vCluster kubeconfigs available for HPA dashboard snapshot" >&2
+  exit 1
+fi
+
+hpa_snapshot_json="$(python - <<'PY' "${hpa_snapshot_specs[@]}"
 import json
 import subprocess
 import sys
 
-clusters = [
-    ("abc", sys.argv[1], "app", "adb-api"),
-    ("xyz", sys.argv[2], "app", "adb-api"),
-    ("shared", sys.argv[3], "processing", "adb-interpolation-api"),
-]
+def parse_spec(raw_spec):
+    cluster, kubeconfig, namespace, hpa_name = raw_spec.split('|', 3)
+    return cluster, kubeconfig, namespace, hpa_name
+
+clusters = [parse_spec(item) for item in sys.argv[1:]]
 
 def run_json(kubeconfig, namespace, name):
     return subprocess.check_output([
@@ -72,7 +95,14 @@ def metric_map(current_metrics):
 
 result = []
 for cluster, kubeconfig, namespace, hpa_name in clusters:
-    payload = json.loads(run_json(kubeconfig, namespace, hpa_name))
+    try:
+        payload = json.loads(run_json(kubeconfig, namespace, hpa_name))
+    except subprocess.CalledProcessError as error:
+        print(
+            f'WARN: skipping {cluster}/{namespace}/{hpa_name}; kubectl failed: {error}',
+            file=sys.stderr,
+        )
+        continue
     status = payload.get('status', {})
     spec = payload.get('spec', {})
     metrics = metric_map(status.get('currentMetrics', []))

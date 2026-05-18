@@ -47,7 +47,7 @@ Usage:
      --target-env <ENV_NAME> \
      --target-url <service-url> \
      --target-service <service-name> \
-     [--snapshot-scope all|shared|abc|xyz|none] \
+     [--snapshot-scope all|shared|abc|none] \
      [--env KEY=VALUE]
 EOF
 }
@@ -174,7 +174,6 @@ infer_snapshot_scope() {
   case "${NAMESPACE}" in
     vcluster-shared) printf 'shared' ;;
     vcluster-abc) printf 'abc' ;;
-    vcluster-xyz) printf 'xyz' ;;
     *) printf 'all' ;;
   esac
 }

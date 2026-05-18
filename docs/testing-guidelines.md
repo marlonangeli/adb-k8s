@@ -33,11 +33,9 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 - vClusters acessíveis por kubeconfig público:
   - `shared` -> `147.15.124.246`
   - `abc` -> `163.176.198.222`
-  - `xyz` -> `64.181.184.95`
 - Estado base antes de iniciar carga:
   - `shared-interpolation` -> `Synced / Healthy`
   - `tenant-abc-adb-api` -> `Synced / Healthy`
-  - `tenant-xyz-adb-api` -> `Synced / Healthy`
 
 ## Regras para stress tests em Always Free
 
@@ -55,7 +53,7 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 ## Testes de uso de recursos
 
 1. Gere carga com os scripts k6 **in-cluster** usando os tasks em `mise.toml`
-   (`k6-shared-balance`, `k6-tenant-abc-ramp`, `k6-tenant-xyz-ramp`, etc.).
+   (`k6-shared-balance`, `k6-tenant-abc-ramp`, etc.).
 2. Antes de iniciar, capture baseline do cluster:
     ```bash
    cd /home/ilegna/Work/tcc
@@ -97,8 +95,30 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
    para registrar distribuição por hostname; ele grava evidências em
    `evidencias/escalabilidade/shared-interpolation` e deve ser correlacionado com
    HPA/réplicas do Deployment `adb-interpolation-api` no namespace `processing`.
-5. Para tenants, use primeiro os smokes (`/input/hi`) e depois `mise run
-   k6-tenant-abc-ramp` / `mise run k6-tenant-xyz-ramp`, que executam bootstrap
+   Se o teste exigir ajustes temporários no HPA/Deployment, pause antes a
+   sincronização automática do Argo CD para evitar que ele reverta a evidência
+   durante a rampa:
+   ```bash
+   kubectl -n argocd patch application shared-interpolation --type merge \
+     -p '{"spec":{"syncPolicy":null}}'
+   ```
+   Verifique que a política foi removida antes de iniciar a carga:
+   ```bash
+   kubectl -n argocd get application shared-interpolation \
+     -o jsonpath='{.spec.syncPolicy}{"\n"}'
+   ```
+   Ao finalizar a coleta de evidências, restaure a política GitOps padrão do
+   manifesto (`prune`, `selfHeal` e criação de namespace):
+   ```bash
+   kubectl -n argocd patch application shared-interpolation --type merge \
+     -p '{"spec":{"syncPolicy":{"automated":{"prune":true,"selfHeal":true},"syncOptions":["CreateNamespace=true"]}}}'
+   ```
+   Em versões recentes do Argo CD, uma alternativa menos destrutiva é preservar a
+   política e pausar apenas `automated.enabled=false`; porém, para estes ensaios
+   locais, remover `syncPolicy` deixa explícito que a Application não deve
+   sincronizar até a restauração manual.
+5. Para tenants, use primeiro o smoke (`/input/hi`) e depois `mise run
+     k6-tenant-abc-ramp`, que executa bootstrap
    real (`POST /person` + `POST /auth`) e CRUD autenticado leve de `company` e
    `employee`; correlacione os artefatos com `kubectl top`, HPA e snapshots do
    Grafana.
