@@ -11,8 +11,6 @@ spec:
     repoURL: ${ADB_API_REPO_URL}
     targetRevision: ${ADB_API_REVISION}
     path: ${ADB_API_PATH}
-    directory:
-      recurse: true
   destination:
     name: ${TENANT_CLUSTER_NAME}
     namespace: ${TENANT_NAMESPACE}

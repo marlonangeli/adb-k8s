@@ -1,5 +1,63 @@
 # Changelog
 
+## 2026-05-06
+- Testes k6 foram preparados para execução **in-cluster** via `grafana/k6:1.7.1`, com runner Kubernetes reutilizável (`scripts/k6-run-incluster.sh`, `manifests/k6/k6-runner-job.yaml`) e cenários atualizados para usar métricas customizadas, summaries padronizados e URLs reais de Services internos.
+- Adicionados `mise tasks` para baseline, balanceamento da interpolação compartilhada e smoke/ramp por tenant, reduzindo o uso de `localhost`/`port-forward` como caminho principal de validação.
+- Criado pipeline de artefatos para o TCC (`scripts/k6-artifact-report.py`, `scripts/k6-baseline-snapshot.sh`) gerando relatórios HTML/Markdown, tabelas CSV, distribuição por pod e snapshots `pre`/`post` do cluster.
+- O runner `scripts/k6-run-incluster.sh` passou a usar requests/limits mais leves por padrão (`20m/64Mi` → `200m/256Mi`) para caber melhor no cluster OKE com capacidade restrita durante ensaios de carga.
+- O pipeline k6 agora envia métricas diretamente para o Prometheus via `experimental-prometheus-rw`, usa `testid` por execução para filtrar dashboards Grafana, gera relatórios locais por consulta PromQL e captura snapshots apenas do escopo testado (`shared`, `abc` ou `xyz`). Também foi adicionada a tarefa `mise run k6-cleanup` para remover Jobs/ConfigMaps antigos antes de repetir cenários.
+- Os testes k6 dos tenants foram alinhados ao plano do `adb-api-3`: smoke objetivo em `GET /input/hi` e rampa com bootstrap real (`POST /person` + `POST /auth`) mais CRUD autenticado leve de `company` e `employee`, sem depender de token fixo como caminho principal.
+- Adicionado o cenário `shared-interpolation/escalabilidade.js` e a tarefa `k6-shared-escalabilidade` para gerar rampa de VUs contra a API de interpolação compartilhada, exportando métricas ao Prometheus com tags estáveis e evidências em `evidencias/escalabilidade/shared-interpolation` para correlação com HPA/réplicas.
+- Reduzido o footprint base da `adb-api` dos tenants: HPA agora limita `maxReplicas` em `3`, os requests/limits do Deployment foram ajustados para um perfil mais leve e os `JAVA_OPTS` passaram a ser forçados para `-Xms256m -Xmx768m` via patch de ConfigMap por tenant, preservando a API em um envelope menor para OKE Always Free. (`../adb-api-3/k8s/base/deployment-adb-api.yaml`, `../adb-api-3/k8s/base/hpa-adb-api.yaml`, `../adb-api-3/k8s/base/configmap-app-settings.yaml`, `../adb-api-3/k8s/tenants/{abc,xyz}/configmap-java-opts-patch.yaml`)
+- `bin/95-argocd.sh` passou a instalar o Argo CD com requests/limits explícitos e menores para `controller`, `applicationSet`, `repoServer`, `server` e `redis`, alinhados ao consumo médio observado no cluster OKE.
+
+## 2026-05-05
+- Adicionado `scripts/port-forward-service-loop.sh` para manter `kubectl port-forward` em loop com reconexão automática após queda e encerramento limpo via `Ctrl+C`; `mise.toml` agora expõe tarefas dedicadas por serviço e atualiza a sessão tmux `port-forwards` para usar o modo resiliente.
+- Reorganizado o dashboard `grafana/tcc-pod-compute-dashboard.json` para destacar os painéis de HPA logo abaixo do uso de CPU/memória por pod, adicionando throughput de rede por pod (receive/transmit) antes do bloco de HPA e removendo os painéis redundantes `Running pod count over time` e `HPA refresh notes`; `scripts/grafana-upsert-tcc-dashboard.sh` também deixou de renderizar o bloco de notas removido.
+
+## 2026-04-13
+- Observabilidade OKE agora expõe `PROMETHEUS_REQUEST_CPU` e `PROMETHEUS_SCRAPE_INTERVAL` em `env.sh`; o estágio `bin/70-observability.sh` passou a aplicar `scrapeInterval` configurável (default seguro em `30s`) para permitir testes com polling mais frequente sem voltar ao perfil de carga anterior.
+- O estágio `bin/80-longhorn.sh` agora explicita `LONGHORN_DEFAULT_REPLICA_COUNT`, cria/atualiza a StorageClass `longhorn-2` e a promove como default, evitando a limitação de imutabilidade do `StorageClass longhorn` original e alinhando novos volumes ao cluster OKE de 2 nós.
+- Afinado o perfil `Always Free`: requests default dos control planes/syncers de vCluster foram reduzidos em `env.sh`, o `kube-prometheus-stack` baixou requests de Grafana/operator/kube-state-metrics, e os manifests das APIs/DB compartilhada foram enxugados para caber melhor em OKE A1 2x2 OCPU/24 GiB sem sacrificar o isolamento multi-tenant.
+
+## 2026-03-18
+- Hardening de runtime após falha real no estágio `observability`: `bin/70-observability.sh` agora trata ausência de `crds/*.yaml` de forma defensiva e aplica fallback via `helm show crds` antes de abortar.
+- Correção adicional no `observability`: aplicação de CRDs migrou para `kubectl apply --server-side --force-conflicts` com limite de tentativas, eliminando erro recorrente `metadata.annotations: Too long` (client-side apply em CRDs grandes).
+- `scripts/oke-preflight-check.sh` passou a validar escrita em `STATE_DIR` e `LOG_FILE`, falhando cedo quando permissões impedem execução (evita erro tardio no deploy).
+- `env.sh` agora permite sobrescrever `STATE_DIR` e `LOG_FILE` por ambiente, e `bin/lib.sh` valida criação/escrita desses paths com mensagens explícitas.
+- Defaults de runtime migrados para `<repo>/.state/*` (`STATE_DIR` e `LOG_FILE`), removendo dependência de `/var/*` no fluxo padrão.
+- `bin/60-rancher.sh` removeu arquivo temporário fixo em `/tmp` e adotou `mktemp` para evitar colisões.
+- Runbook OKE atualizado com troubleshooting específico para `SyncLoadBalancerFailed` + `CreateNetworkSecurityGroup` (`NotAuthorizedOrNotFound`) e caminhos de resolução (IAM NSG ou fallback `SL-All`).
+- Fase 3 iniciada: criado preflight operacional (`scripts/oke-preflight-check.sh`) com alvo `make preflight-oke` e fluxo agregado `make deploy-oke` para executar estágios OKE com gate inicial.
+- Estágios bare-metal `bin/10-so-requirements.sh`, `bin/20-kubeadm-init.sh`, `bin/30-cilium.sh` e `bin/35-join-workers.sh` agora fazem auto-skip em `PLATFORM_MODE=oke` para reduzir risco operacional.
+- Corrigida interpolação de variáveis no patch JSON do serviço Longhorn em OKE (anotações de LB agora aplicam valores reais de `LONGHORN_*`).
+- `bin/lib.sh` agora instala CLIs faltantes em `~/.local/bin` quando `/usr/local/bin` não é gravável, reduzindo dependência de root para `helm`, `vcluster` e `cilium`.
+- `bin/90-vcluster.sh` ganhou modo automático (`VC_MANUAL_EXECUTION=0`) e mensagens claras para execução em terminais não interativos.
+- Runbook OKE recebeu seção de rollback por estágio e atalhos de operação/validação (`preflight`, `deploy`, `report-oke-exposure`).
+- Registrada evidência operacional atual (preflight/exposure) indicando que a implantação OKE ainda não foi executada neste host/contexto. (`docs/oke-phases.md`, `docs/checkpoints/2026-03-03.md`)
+- Fase 3 marcada como concluída no rastreador de fases, com transição preparada para Fase 4 (deploy controlado e verificações de ponta a ponta). (`docs/oke-phases.md`)
+- Fase 2 da trilha OKE documentada com rastreamento de status por fases e auditoria completa de compatibilidade de scripts (`docs/oke-phases.md`, `docs/oke-script-audit.md`).
+- Adicionado relatório operacional de exposição (`scripts/oke-exposure-report.sh` + `make report-oke-exposure`) para identificar serviços internos/públicos e recursos de borda ativos.
+- Ajustado `bin/55-cert-manager.sh` para usar classe de ingress ACME compatível com modo OKE por padrão, evitando fallback fixo em `nginx`.
+- Criado runbook operacional OKE com passo a passo de execução, validação, exposição pública controlada e caminhos exatos no OCI Console (NSG, DNS, WAF, add-ons). (`docs/oke-operator-runbook.md`)
+- Script de validação de isolamento agora resolve kubeconfigs automaticamente por `VCLUSTER_TENANTS`/arquivos de estado e exibe diagnóstico quando `/var/opt/cluster-state` estiver vazio. (`scripts/validate-tenant-routing-isolation.sh`)
+- Exposição dos serviços de plataforma em OKE passou a aceitar toggles por variável de ambiente para interno/publico por componente (Argo CD, Grafana e Longhorn), mantendo defaults seguros internos. (`env.sh`, `bin/95-argocd.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`)
+- Adicionado script operacional de fácil acesso para validar isolamento entre tenants e roteamento compartilhado no OKE (`scripts/validate-tenant-routing-isolation.sh`), com alvo dedicado no Makefile (`make validate-tenant-routing`) e referências no README/guia de testes/readiness.
+- Fluxo de manifests multi-tenant foi endurecido para OKE: `adb-api-3` deixou de gerar Ingress por tenant, removeu overlays Cilium legados e passou a forcar URLs internas via patch de ConfigMap para manter `adb-api-3` privado por vCluster. (`adb-api-3/k8s/base/kustomization.yaml`, `adb-api-3/k8s/base/networkpolicy-adb-api.yaml`, `adb-api-3/k8s/tenants/*/kustomization.yaml`, `adb-api-3/k8s/tenants/*/configmap-routing-patch.yaml`)
+- `adb-interpolation-api` foi ajustada para caminho OKE com Service `LoadBalancer` interno (NLB + NSG mode), remocao de Ingress no Kustomize e política de rede revisada para compartilhamento controlado. (`adb-interpolation-api/k8s/base/service.yaml`, `adb-interpolation-api/k8s/base/kustomization.yaml`, `adb-interpolation-api/k8s/base/networkpolicy.yaml`, `adb-interpolation-api/k8s/overlays/shared/kustomization.yaml`)
+- Automações `adb-k8s` passaram a tratar OKE como modo padrão (`PLATFORM_MODE=oke`), com desativação explícita de MetalLB/ingress-nginx no caminho OKE e atualização dos scripts de vCluster para remover geração de `sslip.io`, Ingress per-tenant e Cilium CRDs no overlay. (`env.sh`, `bin/40-metallb.sh`, `bin/50-ingress-nginx.sh`, `scripts/vcluster/common.sh`, `scripts/vcluster/create.sh`)
+- Argo CD, Observabilidade e Longhorn receberam defaults de exposição via LoadBalancer interno OKE (NLB/NSG), reduzindo dependência operacional de ingress-nginx para operações básicas de plataforma. (`bin/95-argocd.sh`, `bin/70-observability.sh`, `bin/80-longhorn.sh`)
+- Criada pesquisa dedicada para substituicao de `ingress-nginx` no OKE, com comparativo entre opcao OKE-integrada (OCI Native Ingress), Gateway API e controladores viaveis, incluindo plano de migracao em fases e checklist de validacao. (`docs/oke-ingress-gateway-api-research.md`)
+- O indice de documentacao passou a destacar a urgencia da migracao de ingress no OKE e atualizou ordem de leitura e referencias externas para ingress/Gateway API. (`docs/README.md`)
+- O backlog de readiness elevou a migracao de ingress para bloqueador explicito de deploy confiavel, com preflight de visibilidade para recursos de edge. (`docs/oke-readiness-gaps.md`)
+- As decisoes de migracao reforcaram a prioridade de remover `ingress-nginx` e formalizaram a estrategia em duas fases (reducao de risco e consolidacao em Gateway API). (`docs/oke-migration-decisions.md`)
+- O checkpoint consolidado recebeu atualizacao de prioridade para ingress e o guia de testes passou a exigir validacao da estrategia de entrada escolhida para OKE. (`docs/checkpoints/2026-03-03.md`, `docs/testing-guidelines.md`)
+
+## 2026-03-13
+- Adicionado checkpoint consolidado da migração para OKE com status dos repositórios, branches ativas, bloqueio operacional do `kubectl` e próximos passos imediatos. (`docs/checkpoints/2026-03-03.md`)
+- Criado índice de documentação com referências cruzadas entre `adb-k8s`, `adb-api-3`, `adb-interpolation-api` e `infra-oci`, incluindo links externos da Oracle para Terraform/OCI API key. (`docs/README.md`)
+- Documentado o backlog de gaps para deploy em OKE (configuração, implementação, preflight, ordem de execução) e registrado que `kubectl` funciona via `mise exec -- kubectl`. (`docs/oke-readiness-gaps.md`, `docs/checkpoints/2026-03-03.md`)
+
 ## 2025-10-29
 - ADB API passou a aguardar o PostgreSQL ficar saudável antes de subir os pods; um Job dedicado executa o seed com o dialeto padrão do PostgreSQL e marca a conclusão para reinicializações futuras, mantendo o runtime em PostGIS. (`adb-api-3/k8s/base/job-adb-api-seed.yaml`, `adb-api-3/k8s/base/deployment-adb-api.yaml`)
 - O StatefulSet do PostgreSQL define `PGDATA` em um subdiretório, evitando novos `CrashLoopBackOff` em volumes Longhorn com `lost+found`. (`adb-api-3/k8s/base/statefulset-postgres.yaml`)

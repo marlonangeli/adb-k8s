@@ -6,6 +6,8 @@ source "$(dirname "$0")/lib.sh"
 STEP="vcluster"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+VC_MANUAL_EXECUTION="${VC_MANUAL_EXECUTION:-1}"
+
 require_commands kubectl envsubst
 source "${ROOT_DIR}/scripts/vcluster/common.sh"
 
@@ -15,6 +17,15 @@ INGRESS_IP="${VC_INGRESS_IP}"
 prompt_manual_execution() {
   local message="$1"; shift
   local -a cmd=("$@")
+
+  if [[ "${VC_MANUAL_EXECUTION}" == "0" ]]; then
+    log "${message} Execução automática habilitada (VC_MANUAL_EXECUTION=0)."
+    local cmd_rc=0
+    "${cmd[@]}" || cmd_rc=$?
+    vc::debug "execução automática finalizada com rc=${cmd_rc}"
+    return "${cmd_rc}"
+  fi
+
   log "${message}"
   printf '  '
   local token
@@ -22,6 +33,12 @@ prompt_manual_execution() {
     printf '%q ' "${token}"
   done
   printf '\n'
+
+  if [[ ! -t 0 ]]; then
+    log "terminal não interativo: execute o comando manualmente e rode novamente, ou use VC_MANUAL_EXECUTION=0 para execução automática."
+    return 1
+  fi
+
   read -rp $'Execute o comando acima em outro terminal e pressione ENTER para continuar...\n> ' _
 }
 
@@ -70,7 +87,12 @@ for tenant in "${TENANT_IDS[@]}"; do
     --profile private
     --state-key "${state_key}"
   )
-  prompt_manual_execution "Execução manual necessária para o vcluster ${cluster}." "${create_cmd[@]}"
+  if ! prompt_manual_execution "Execução manual necessária para o vcluster ${cluster}." "${create_cmd[@]}"; then
+    save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+    vc::clear_cluster_checkpoint "${cluster}"
+    log "não foi possível concluir a etapa manual do vcluster ${cluster}."
+    exit 1
+  fi
   if [[ ! -f "${kubeconfig_path}" ]]; then
     save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
     vc::clear_cluster_checkpoint "${cluster}"
@@ -129,7 +151,12 @@ if [[ "${ENABLE_SHARED_VCLUSTER}" == "1" ]]; then
         --profile shared
         --state-key "${state_key}"
       )
-      prompt_manual_execution "Execução manual necessária para o vcluster compartilhado ${cluster}." "${shared_cmd[@]}"
+      if ! prompt_manual_execution "Execução manual necessária para o vcluster compartilhado ${cluster}." "${shared_cmd[@]}"; then
+        save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
+        vc::clear_cluster_checkpoint "${cluster}"
+        log "não foi possível concluir a etapa manual do vcluster compartilhado ${cluster}."
+        exit 1
+      fi
       if [[ ! -f "${kubeconfig_path}" ]]; then
         save_state_var "VCLUSTER_LAST_FAILED" "${cluster}"
         vc::clear_cluster_checkpoint "${cluster}"
@@ -168,49 +195,50 @@ if [[ "${ENABLE_SHARED_VCLUSTER}" == "1" ]]; then
   save_state_var "VCLUSTER_SHARED_NAMESPACE" "${SHARED_VCLUSTER_NAMESPACE}"
 fi
 
-HUBBLE_HOSTNAME=$(resolve_hostname "${HUBBLE_HOST_OVERRIDE:-}" "hubble")
-HUBBLE_LOCAL_HOSTNAME=$(local_sslip_host "hubble")
-save_state_var "HUBBLE_HOSTNAME" "${HUBBLE_HOSTNAME}"
-save_state_var "HUBBLE_LOCAL_HOSTNAME" "${HUBBLE_LOCAL_HOSTNAME}"
+if [[ "${ENABLE_HUBBLE_INGRESS:-0}" == "1" ]]; then
+  HUBBLE_HOSTNAME=$(resolve_hostname "${HUBBLE_HOST_OVERRIDE:-}" "hubble")
+  HUBBLE_LOCAL_HOSTNAME=$(local_sslip_host "hubble")
+  save_state_var "HUBBLE_HOSTNAME" "${HUBBLE_HOSTNAME}"
+  save_state_var "HUBBLE_LOCAL_HOSTNAME" "${HUBBLE_LOCAL_HOSTNAME}"
 
-if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
-  hubble_host_was_set=0
-  if [[ ${HUBBLE_HOST+x} ]]; then
-    hubble_host_was_set=1
-    prev_hubble_host="${HUBBLE_HOST}"
-  fi
-  apply_certificate "kube-system" "hubble-tls" "hubble-tls" "${INGRESS_IP}" \
-    "${HUBBLE_HOSTNAME}" "${HUBBLE_LOCAL_HOSTNAME}"
+  if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
+    hubble_host_was_set=0
+    if [[ ${HUBBLE_HOST+x} ]]; then
+      hubble_host_was_set=1
+      prev_hubble_host="${HUBBLE_HOST}"
+    fi
+    apply_certificate "kube-system" "hubble-tls" "hubble-tls" "${INGRESS_IP}" \
+      "${HUBBLE_HOSTNAME}" "${HUBBLE_LOCAL_HOSTNAME}"
 
-  hubble_local_host_was_set=0
-  if [[ ${HUBBLE_LOCAL_HOST+x} ]]; then
-    hubble_local_host_was_set=1
-    prev_hubble_local_host="${HUBBLE_LOCAL_HOST}"
-  fi
-  export HUBBLE_HOST="${HUBBLE_HOSTNAME}"
-  export HUBBLE_LOCAL_HOST="${HUBBLE_LOCAL_HOSTNAME}"
-  hubble_ingress=$(render_template "${ROOT_DIR}/manifests/hubble.ingress.yaml")
-  if (( hubble_host_was_set )); then
-    export HUBBLE_HOST="${prev_hubble_host}"
+    hubble_local_host_was_set=0
+    if [[ ${HUBBLE_LOCAL_HOST+x} ]]; then
+      hubble_local_host_was_set=1
+      prev_hubble_local_host="${HUBBLE_LOCAL_HOST}"
+    fi
+    export HUBBLE_HOST="${HUBBLE_HOSTNAME}"
+    export HUBBLE_LOCAL_HOST="${HUBBLE_LOCAL_HOSTNAME}"
+    hubble_ingress=$(render_template "${ROOT_DIR}/manifests/hubble.ingress.yaml")
+    if (( hubble_host_was_set )); then
+      export HUBBLE_HOST="${prev_hubble_host}"
+    else
+      unset HUBBLE_HOST
+    fi
+    if (( hubble_local_host_was_set )); then
+      export HUBBLE_LOCAL_HOST="${prev_hubble_local_host}"
+    else
+      unset HUBBLE_LOCAL_HOST
+    fi
+    kubectl apply -f "${hubble_ingress}"
+    log "Hubble UI disponível em https://${HUBBLE_HOSTNAME} e https://${HUBBLE_LOCAL_HOSTNAME}"
   else
-    unset HUBBLE_HOST
-  fi
-  if (( hubble_local_host_was_set )); then
-    export HUBBLE_LOCAL_HOST="${prev_hubble_local_host}"
-  else
-    unset HUBBLE_LOCAL_HOST
-  fi
-  kubectl apply -f "${hubble_ingress}"
-  log "Hubble UI disponível em https://${HUBBLE_HOSTNAME} e https://${HUBBLE_LOCAL_HOSTNAME}"
-else
-  kubectl apply -f - <<EOF
+    kubectl apply -f - <<EOF
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: hubble-ui
   namespace: kube-system
 spec:
-  ingressClassName: nginx
+  ingressClassName: ${VCLUSTER_INGRESS_CLASS}
   rules:
   - host: ${HUBBLE_HOSTNAME}
     http:
@@ -233,7 +261,10 @@ spec:
             port:
               number: 80
 EOF
-  log "Hubble UI disponível em http://${HUBBLE_HOSTNAME} e http://${HUBBLE_LOCAL_HOSTNAME}"
+    log "Hubble UI disponível em http://${HUBBLE_HOSTNAME} e http://${HUBBLE_LOCAL_HOSTNAME}"
+  fi
+else
+  log "ENABLE_HUBBLE_INGRESS=0: publicação de Ingress do Hubble desabilitada no fluxo OKE."
 fi
 
 ok "${STEP}"

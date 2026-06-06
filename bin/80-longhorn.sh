@@ -8,24 +8,28 @@ donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
 require_commands kubectl envsubst
 ensure_helm
+: "${LONGHORN_DEFAULT_REPLICA_COUNT:=2}"
+: "${LONGHORN_STORAGECLASS_NAME:=longhorn-2}"
 
-if ! donep "ingress-nginx"; then
-  log "ingress-nginx ainda não foi provisionado; execute bin/50-ingress-nginx.sh antes deste passo."
-  exit 1
-fi
+if [[ "${PLATFORM_MODE:-baremetal}" != "oke" ]]; then
+  if ! donep "ingress-nginx"; then
+    log "ingress-nginx ainda não foi provisionado; execute bin/50-ingress-nginx.sh antes deste passo."
+    exit 1
+  fi
 
-if ! ING_IP_TMP=$(current_ingress_ip 2>/dev/null); then
-  log "Ingress IP não conhecido. Execute bin/50-ingress-nginx.sh e aguarde a atribuição do IP antes de instalar o Longhorn."
-  exit 1
+  if ! ING_IP_TMP=$(current_ingress_ip 2>/dev/null); then
+    log "Ingress IP não conhecido. Execute bin/50-ingress-nginx.sh e aguarde a atribuição do IP antes de instalar o Longhorn."
+    exit 1
+  fi
+  INGRESS_IP="${ING_IP_TMP}"
 fi
-INGRESS_IP="${ING_IP_TMP}"
 
 helm repo add longhorn https://charts.longhorn.io
 helm repo update
 kubectl create ns longhorn-system || true
 
 helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
-  --set-string defaultSettings.defaultReplicaCount="2" \
+  --set-string defaultSettings.defaultReplicaCount="${LONGHORN_DEFAULT_REPLICA_COUNT}" \
   --set longhornManager.resources.requests.cpu=120m \
   --set longhornManager.resources.requests.memory=160Mi \
   --set longhornManager.resources.limits.cpu=350m \
@@ -51,6 +55,32 @@ helm upgrade -i longhorn longhorn/longhorn -n longhorn-system \
   --set csi.snapshotter.resources.limits.cpu=100m \
   --set csi.snapshotter.resources.limits.memory=96Mi
 
+kubectl apply -f - <<EOF
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: ${LONGHORN_STORAGECLASS_NAME}
+  annotations:
+    storageclass.kubernetes.io/is-default-class: "true"
+provisioner: driver.longhorn.io
+allowVolumeExpansion: true
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+parameters:
+  numberOfReplicas: "${LONGHORN_DEFAULT_REPLICA_COUNT}"
+  staleReplicaTimeout: "30"
+  fromBackup: ""
+  fsType: ext4
+  dataLocality: disabled
+  unmapMarkSnapChainRemoved: ignored
+  disableRevisionCounter: "true"
+  dataEngine: v1
+  backupTargetName: default
+EOF
+
+kubectl annotate storageclass longhorn storageclass.kubernetes.io/is-default-class="false" --overwrite >/dev/null 2>&1 || true
+kubectl annotate storageclass "${LONGHORN_STORAGECLASS_NAME}" storageclass.kubernetes.io/is-default-class="true" --overwrite >/dev/null
+
 log "validando rollout do Longhorn"
 wait_rollout longhorn-system deployment longhorn-ui
 if kubectl -n longhorn-system get deployment longhorn-driver-deployer >/dev/null 2>&1; then
@@ -67,6 +97,38 @@ LONGHORN_HOSTNAME=$(resolve_hostname "${LONGHORN_HOST_OVERRIDE:-}" "longhorn")
 LONGHORN_LOCAL_HOSTNAME=$(local_sslip_host "longhorn")
 save_state_var "LONGHORN_HOSTNAME" "${LONGHORN_HOSTNAME}"
 save_state_var "LONGHORN_LOCAL_HOSTNAME" "${LONGHORN_LOCAL_HOSTNAME}"
+
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  longhorn_exposure_label="publico"
+  if [[ "${LONGHORN_LB_INTERNAL}" == "true" ]]; then
+    longhorn_exposure_label="interno"
+  fi
+  longhorn_patch_payload=$(cat <<EOF
+{
+  "spec": {
+    "type": "LoadBalancer"
+  },
+  "metadata": {
+    "annotations": {
+      "oci.oraclecloud.com/load-balancer-type": "${LONGHORN_LB_TYPE}",
+      "oci-network-load-balancer.oraclecloud.com/internal": "${LONGHORN_LB_INTERNAL}",
+      "oci.oraclecloud.com/security-rule-management-mode": "${LONGHORN_LB_SECURITY_RULE_MODE}"
+    }
+  }
+}
+EOF
+)
+  kubectl -n longhorn-system patch svc longhorn-frontend --type merge -p "${longhorn_patch_payload}"
+  longhorn_endpoint="$(wait_for_lb_ip longhorn-system longhorn-frontend 300 || true)"
+  if [[ -n "${longhorn_endpoint}" ]]; then
+    save_state_var "LONGHORN_HOSTNAME" "${longhorn_endpoint}"
+    log "Longhorn UI disponível em http://${longhorn_endpoint} (LoadBalancer ${longhorn_exposure_label} OKE)."
+  else
+    log "Longhorn instalado; endpoint LoadBalancer OKE não disponível no tempo esperado."
+  fi
+  ok "${STEP}"
+  exit 0
+fi
 
 if [[ "${TLS_ENABLED:-0}" == "1" ]]; then
   apply_certificate "longhorn-system" "longhorn-tls" "longhorn-tls" "${INGRESS_IP}" \

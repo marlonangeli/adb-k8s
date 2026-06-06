@@ -6,6 +6,12 @@ source "$(dirname "$0")/lib.sh"
 STEP="ingress-nginx"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  log "PLATFORM_MODE=oke: ingress-nginx desabilitado. Use OCI Native Ingress ou Gateway API."
+  ok "${STEP}"
+  exit 0
+fi
+
 require_commands kubectl envsubst
 ensure_helm
 helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx

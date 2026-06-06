@@ -89,16 +89,27 @@ vc::load_defaults() {
   : "${SHARED_CONTROL_PLANE_K8S_VERSION:=}"
 
   : "${VCLUSTER_SERVICE_TYPE:=LoadBalancer}"
-  : "${VCLUSTER_METALLB_POOL:=pool-bridge}"
-  : "${VCLUSTER_INGRESS_CLASS:=nginx}"
+  : "${VCLUSTER_INGRESS_CLASS:=native-oci}"
   : "${VCLUSTER_ENABLE_INGRESS:=0}"
-  : "${VCLUSTER_HOST_TEMPLATE:=vcluster-[cluster].[slug].sslip.io}"
-  : "${VC_DISABLE_NETWORK_POLICIES:=1}"
+  : "${VCLUSTER_METRICS_SERVER_ENABLED:=1}"
+  : "${VCLUSTER_HOST_TEMPLATE:=vcluster-[cluster].[slug].${BASE_DOMAIN:-adb.internal}}"
+  : "${VCLUSTER_LOAD_BALANCER_TYPE:=nlb}"
+  : "${VCLUSTER_LOAD_BALANCER_INTERNAL:=true}"
+  : "${VCLUSTER_LB_SECURITY_RULE_MODE:=NSG}"
+  : "${METRICS_SERVER_NAMESPACE:=kube-system}"
+  : "${METRICS_SERVER_SERVICE_NAME:=metrics-server}"
+  : "${METRICS_SERVER_SERVICE_PORT:=443}"
+  : "${SHARED_INTERPOLATION_HOST:=}"
+  : "${VC_DISABLE_NETWORK_POLICIES:=0}"
 }
 
 vc::make_host() {
-  local prefix="$1" slug="$2"
-  printf '%s.%s.sslip.io\n' "${prefix}" "${slug}"
+  local cluster="$1" slug="$2"
+  local template host
+  template="${VCLUSTER_HOST_TEMPLATE}"
+  host="${template//[cluster]/${cluster}}"
+  host="${host//[slug]/${slug}}"
+  printf '%s\n' "${host}"
 }
 
 vc::ensure_prereqs() {
@@ -112,14 +123,15 @@ vc::ensure_prereqs() {
   : "${VC_TENANT_MANIFEST_ROOT:=${ROOT_DIR}/adb-api-3/k8s/tenants}"
   : "${VC_INTERPOLATION_OVERLAY_DIR:=${ROOT_DIR}/adb-interpolation-api/k8s/overlays/shared}"
 
-  VC_INGRESS_IP="$(current_ingress_ip)"
-  if [[ -z "${VC_INGRESS_IP}" ]]; then
-    log "Ingress IP não conhecido; execute o estágio do ingress antes do vcluster."
-    exit 1
+  VC_INGRESS_IP="$(current_ingress_ip || true)"
+  if [[ -n "${VC_INGRESS_IP}" ]]; then
+    vc::debug "Ingress IP detectado: ${VC_INGRESS_IP}"
+    VC_INGRESS_SLUG="$(sslip_slug "${VC_INGRESS_IP}")"
+    vc::debug "Slug do ingress: ${VC_INGRESS_SLUG}"
+  else
+    VC_INGRESS_SLUG="internal"
+    vc::debug "Ingress IP não definido; usando slug padrão '${VC_INGRESS_SLUG}'"
   fi
-  vc::debug "Ingress IP detectado: ${VC_INGRESS_IP}"
-  VC_INGRESS_SLUG="$(sslip_slug "${VC_INGRESS_IP}")"
-  vc::debug "Slug do ingress: ${VC_INGRESS_SLUG}"
   vc::debug "TENANT_NAMESPACE_PREFIX=${TENANT_NAMESPACE_PREFIX} TARGET_NAMESPACE=${TENANT_TARGET_NAMESPACE}"
 
   VC_K8S_API_IP="$(kubectl -n default get svc kubernetes -o jsonpath='{.spec.clusterIP}' 2>/dev/null || true)"
@@ -136,6 +148,32 @@ vc::ensure_prereqs() {
     VC_MONITORING_READY=0
     log "namespace monitoring não encontrado; kubeconfigs dos vclusters não serão publicados para observabilidade."
   fi
+}
+
+vc::discover_shared_interpolation_host() {
+  local shared_kubeconfig="${VCLUSTER_SHARED_KUBECONFIG:-${STATE_DIR}/kubeconfig-${SHARED_VCLUSTER_NAME}.yaml}"
+  local host
+
+  if [[ -f "${shared_kubeconfig}" ]]; then
+    host="$(kubectl --kubeconfig "${shared_kubeconfig}" -n processing get svc adb-interpolation-api -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)"
+    if [[ -n "${host}" && "${host}" != "<no value>" ]]; then
+      printf '%s\n' "${host}"
+      return 0
+    fi
+
+    host="$(kubectl --kubeconfig "${shared_kubeconfig}" -n processing get svc adb-interpolation-api -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)"
+    if [[ -n "${host}" && "${host}" != "<no value>" ]]; then
+      printf '%s\n' "${host}"
+      return 0
+    fi
+  fi
+
+  if [[ -n "${SHARED_INTERPOLATION_HOST}" ]]; then
+    printf '%s\n' "${SHARED_INTERPOLATION_HOST}"
+    return 0
+  fi
+
+  printf '%s\n' 'adb-interpolation-api.processing.svc.cluster.local'
 }
 
 vc::cluster_checkpoint() {
@@ -177,12 +215,12 @@ vc::state_key() {
 
 vc::hostname_for_cluster() {
   local cluster="$1"
-  local slug="${VC_INGRESS_SLUG:-$(sslip_slug "${VC_INGRESS_IP}")}"
+  local slug="${VC_INGRESS_SLUG:-internal}"
   vc::debug "cluster: ${cluster}"
-  vc::debug "VC_INGRESS_SLUG: ${VC_INGRESS_SLUG} / $(sslip_slug "${VC_INGRESS_IP}")"
+  vc::debug "VC_INGRESS_SLUG: ${VC_INGRESS_SLUG}"
   vc::debug "slug: ${slug}"
   local host
-  host="$(vc::make_host "vcluster-${cluster}" "${slug}")"
+  host="$(vc::make_host "${cluster}" "${slug}")"
   vc::debug "host: ${host}"
   printf '%s\n' "${host}"
 }
@@ -218,7 +256,9 @@ vc::values_for_profile() {
   local cp_request_cpu cp_request_memory cp_limit_cpu cp_limit_memory cp_replicas cp_k8s_version
   local syncer_request_cpu syncer_request_memory syncer_limit_cpu syncer_limit_memory
   local ingress_enabled="false"
+  local metrics_server_enabled="false"
   (( VCLUSTER_ENABLE_INGRESS )) && ingress_enabled="true"
+  [[ "${VCLUSTER_METRICS_SERVER_ENABLED}" == "1" ]] && metrics_server_enabled="true"
   if [[ -n "${host}" ]]; then
     vc::debug "Configurando host do vcluster para ${host}"
   fi
@@ -267,6 +307,10 @@ EOF
 EOF
     fi
     cat <<EOF
+  coredns:
+    deployment:
+      image: ${VCLUSTER_COREDNS_IMAGE}
+
   statefulSet:
     highAvailability:
       replicas: ${cp_replicas}
@@ -286,10 +330,12 @@ EOF
     spec:
       type: ${VCLUSTER_SERVICE_TYPE}
 EOF
-    if [[ "${VCLUSTER_SERVICE_TYPE}" == "LoadBalancer" && -n "${VCLUSTER_METALLB_POOL}" ]]; then
+    if [[ "${VCLUSTER_SERVICE_TYPE}" == "LoadBalancer" ]]; then
       cat <<EOF
     annotations:
-      metallb.universe.tf/address-pool: ${VCLUSTER_METALLB_POOL}
+      oci.oraclecloud.com/load-balancer-type: "${VCLUSTER_LOAD_BALANCER_TYPE}"
+      oci-network-load-balancer.oraclecloud.com/internal: "${VCLUSTER_LOAD_BALANCER_INTERNAL}"
+      oci.oraclecloud.com/security-rule-management-mode: "${VCLUSTER_LB_SECURITY_RULE_MODE}"
 EOF
     fi
     if [[ -n "${host}" ]]; then
@@ -302,6 +348,21 @@ EOF
     host: ${host}
     spec:
       ingressClassName: ${VCLUSTER_INGRESS_CLASS}
+EOF
+    fi
+    if [[ "${metrics_server_enabled}" == "true" ]]; then
+      cat <<EOF
+integrations:
+  metricsServer:
+    enabled: true
+    nodes: true
+    pods: true
+    apiService:
+      service:
+        name: ${METRICS_SERVER_SERVICE_NAME}
+        namespace: ${METRICS_SERVER_NAMESPACE}
+        port: ${METRICS_SERVER_SERVICE_PORT}
+
 EOF
     fi
     cat <<EOF
@@ -420,16 +481,21 @@ vc::ensure_tenant_overlay() {
   local service_ip="$2"
   local shared_host="${3:-}"
 
-  [[ -d "${VC_TENANT_MANIFEST_ROOT}" ]] || return 0
-
-  local slug api_host interpolation_host overlay_dir
-  slug=$(sslip_slug "${service_ip}")
-  api_host="api-${tenant}.${slug}.sslip.io"
+  local api_host interpolation_host
+  api_host="adb-api.${TENANT_TARGET_NAMESPACE}.svc.cluster.local"
   if [[ -n "${shared_host}" ]]; then
     interpolation_host="${shared_host}"
   else
-    interpolation_host="interpolation.${slug}.sslip.io"
+    interpolation_host="$(vc::discover_shared_interpolation_host)"
   fi
+
+  if [[ ! -d "${VC_TENANT_MANIFEST_ROOT}" ]]; then
+    vc::debug "VC_TENANT_MANIFEST_ROOT inexistente (${VC_TENANT_MANIFEST_ROOT}); pulando atualização de overlay para ${tenant}."
+    printf '%s %s\n' "${api_host}" "${interpolation_host}"
+    return 0
+  fi
+
+  local overlay_dir
 
   overlay_dir="${VC_TENANT_MANIFEST_ROOT}/${tenant}"
   mkdir -p "${overlay_dir}"
@@ -442,7 +508,6 @@ kind: Kustomization
 namespace: ${TENANT_TARGET_NAMESPACE}
 resources:
   - ../../base
-  - cilium-network-policy.yaml
 generatorOptions:
   disableNameSuffixHash: true
 configMapGenerator:
@@ -456,7 +521,7 @@ secretGenerator:
     envs:
       - secrets.env
 patches:
-  - path: ingress-patch.yaml
+  - path: configmap-routing-patch.yaml
 EOF
 
   cat >"${overlay_dir}/app.env" <<EOF
@@ -464,13 +529,13 @@ EOF
 TENANT_ID=${tenant}
 PUBLIC_BASE_URL=http://${api_host}
 INTERPOLATION_BASE_URL=http://${interpolation_host}
-  INTERPOLATION_LOAD_BALANCER_MODE=least_conn
-  JAVA_OPTS=-Xms512m -Xmx1500m
-  JPA_DDL_AUTO=none
-  HIBERNATE_DIALECT_RUNTIME=org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
-  HIBERNATE_DIALECT_SEED=org.hibernate.dialect.PostgreSQLDialect
-  JPA_DDL_AUTO_SEED=create
-  SEED_EXTRA_ARGS=
+INTERPOLATION_LOAD_BALANCER_MODE=least_conn
+JAVA_OPTS=-Xms256m -Xmx768m
+JPA_DDL_AUTO=none
+HIBERNATE_DIALECT_RUNTIME=org.hibernate.spatial.dialect.postgis.PostgisPG10Dialect
+HIBERNATE_DIALECT_SEED=org.hibernate.dialect.PostgreSQLDialect
+JPA_DDL_AUTO_SEED=create
+SEED_EXTRA_ARGS=
 EOF
 
   if [[ ! -f "${overlay_dir}/secrets.env" ]]; then
@@ -487,104 +552,14 @@ EOF
     log "arquivo ${overlay_dir}/secrets.env criado com valores padrão; ajuste antes do deploy."
   fi
 
-  cat >"${overlay_dir}/ingress-patch.yaml" <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+  cat >"${overlay_dir}/configmap-routing-patch.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: adb-api
-spec:
-  rules:
-    - host: ${api_host}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: adb-api
-                port:
-                  number: 80
-EOF
-
-  cat >"${overlay_dir}/cilium-network-policy.yaml" <<EOF
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: adb-api-tenant-guard
-spec:
-  endpointSelector:
-    matchLabels:
-      app: adb-api
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
-    - fromEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "ingress-nginx"
-      toPorts:
-        - ports:
-            - port: "80"
-              protocol: TCP
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
-            app: postgres
-      toPorts:
-        - ports:
-            - port: "5432"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "kube-system"
-            "k8s:k8s-app": "kube-dns"
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: TCP
-            - port: "53"
-              protocol: UDP
-    - toCIDRSet:
-        - cidr: "0.0.0.0/0"
-      toPorts:
-        - ports:
-            - port: "80"
-              protocol: TCP
-            - port: "443"
-              protocol: TCP
----
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: adb-postgres-tenant-guard
-spec:
-  endpointSelector:
-    matchLabels:
-      app: postgres
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
-            app: adb-api
-      toPorts:
-        - ports:
-            - port: "5432"
-              protocol: TCP
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "${TENANT_TARGET_NAMESPACE}"
-    - toEndpoints:
-        - matchLabels:
-            "k8s:io.kubernetes.pod.namespace": "kube-system"
-            "k8s:k8s-app": "kube-dns"
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: TCP
-            - port: "53"
-              protocol: UDP
+  name: app-settings
+data:
+  PUBLIC_BASE_URL: http://${api_host}
+  INTERPOLATION_BASE_URL: http://${interpolation_host}
 EOF
 
   vc::debug "Hosts do tenant ${tenant}: API=${api_host} Interpolation=${interpolation_host}"
@@ -593,11 +568,16 @@ EOF
 
 vc::update_shared_overlay() {
   local service_ip="$1"
-  [[ -d "${VC_INTERPOLATION_OVERLAY_DIR}" ]] || return 0
 
-  local slug interpolation_host
-  slug=$(sslip_slug "${service_ip}")
-  interpolation_host="interpolation.${slug}.sslip.io"
+  local interpolation_host
+  interpolation_host="$(vc::discover_shared_interpolation_host)"
+
+  if [[ ! -d "${VC_INTERPOLATION_OVERLAY_DIR}" ]]; then
+    vc::debug "VC_INTERPOLATION_OVERLAY_DIR inexistente (${VC_INTERPOLATION_OVERLAY_DIR}); pulando atualização de overlay compartilhado."
+    printf '%s\n' "${interpolation_host}"
+    return 0
+  fi
+
   vc::debug "Atualizando overlay compartilhado com Service IP=${service_ip} host=${interpolation_host}"
 
   cat >"${VC_INTERPOLATION_OVERLAY_DIR}/settings.env" <<EOF
@@ -607,23 +587,13 @@ LOAD_BALANCER_MODE=least_conn
 MAX_CONCURRENCY=400
 EOF
 
-  cat >"${VC_INTERPOLATION_OVERLAY_DIR}/ingress-patch.yaml" <<EOF
-apiVersion: networking.k8s.io/v1
-kind: Ingress
+  cat >"${VC_INTERPOLATION_OVERLAY_DIR}/configmap-routing-patch.yaml" <<EOF
+apiVersion: v1
+kind: ConfigMap
 metadata:
-  name: adb-interpolation-api
-spec:
-  rules:
-    - host: ${interpolation_host}
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: adb-interpolation-api
-                port:
-                  number: 80
+  name: interpolation-settings
+data:
+  PUBLIC_BASE_URL: http://${interpolation_host}
 EOF
 
   printf '%s\n' "${interpolation_host}"
@@ -651,159 +621,19 @@ vc::refresh_tenant_overlays() {
 
 vc::apply_private_network_policies() {
   local namespace="$1"
-  vc::debug "Aplicando políticas de rede privadas em ${namespace}"
-  local tmp
-  tmp=$(mktemp)
-  register_tmp "${tmp}"
-  {
-    cat <<EOF
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: default-deny-private-egress
-spec:
-  endpointSelector: {}
-  egressDeny:
-  - toEntities:
-    - all
----
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-private-essential-egress
-spec:
-  endpointSelector: {}
-  egress:
-  - toEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "${namespace}"
-  - toEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "kube-system"
-        "k8s:k8s-app": "kube-dns"
-    toPorts:
-    - ports:
-      - port: "53"
-        protocol: ANY
-      rules:
-        dns:
-        - matchPattern: "*"
-  - toCIDRSet:
-    - cidr: "${VC_INGRESS_IP}/32"
-    toPorts:
-    - ports:
-      - port: "80"
-        protocol: TCP
-      - port: "443"
-        protocol: TCP
-EOF
-    if [[ -n "${VC_K8S_API_IP}" ]]; then
-      cat <<EOF
-  - toCIDRSet:
-    - cidr: "${VC_K8S_API_IP}/32"
-    toPorts:
-    - ports:
-      - port: "443"
-        protocol: TCP
-EOF
-    fi
-    cat <<EOF
-  - toEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "${SHARED_VCLUSTER_NAMESPACE}"
----
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-private-ingress
-spec:
-  endpointSelector: {}
-  ingress:
-  - fromEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "${namespace}"
-  - fromEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "ingress-nginx"
-EOF
-  } >"${tmp}"
-  if (( VC_DEBUG )); then
-    vc::debug "Manifesto CNP temporário (${tmp}):"
-    vc::debug "$(sed 's/^/  /' "${tmp}")"
-  fi
-  if ! kubectl apply -n "${namespace}" -f "${tmp}" --server-side --force-conflicts >/dev/null; then
-    vc::phase_fail "${namespace#${TENANT_NAMESPACE_PREFIX}}" "falha aplicar CNP"
-    log "Falha ao aplicar CiliumNetworkPolicy em ${namespace}. Verifique conectividade com o API server."
-    return 1
-  fi
-  if (( VC_DEBUG )); then
-    local cnp_dump
-    cnp_dump=$(kubectl -n "${namespace}" get ciliumnetworkpolicy allow-private-essential-egress -o yaml 2>/dev/null || true)
-    if [[ -n "${cnp_dump}" ]]; then
-      vc::debug "CNP allow-private-essential-egress aplicada:"
-      vc::debug "$(sed 's/^/  /' <<<"${cnp_dump}")"
-    else
-      vc::debug "CNP allow-private-essential-egress ainda não disponível em ${namespace}"
-    fi
-  fi
+  vc::debug "PLATFORM_MODE=oke: políticas de host Cilium removidas para ${namespace}; isolamento mantido por NetworkPolicy nos manifests das aplicações."
 }
 
 vc::apply_shared_network_policies() {
   local namespace="$1"
-  vc::debug "Aplicando políticas de rede compartilhadas em ${namespace}"
-  kubectl apply -n "${namespace}" -f - >/dev/null <<EOF
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: default-deny-shared
-spec:
-  endpointSelector: {}
-  ingressDeny:
-  - fromEntities:
-    - all
-  egressDeny:
-  - toEntities:
-    - all
----
-apiVersion: "cilium.io/v2"
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-shared-traffic
-spec:
-  endpointSelector: {}
-  ingress:
-  - fromEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "${namespace}"
-  - fromEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "ingress-nginx"
-  egress:
-  - toEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "${namespace}"
-  - toEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "ingress-nginx"
-  - toEndpoints:
-    - matchLabels:
-        "k8s:io.kubernetes.pod.namespace": "kube-system"
-        "k8s:k8s-app": "kube-dns"
-    toPorts:
-    - ports:
-      - port: "53"
-        protocol: ANY
-      rules:
-        dns:
-        - matchPattern: "*"
-EOF
+  vc::debug "PLATFORM_MODE=oke: políticas de host Cilium removidas para ${namespace}; compartilhamento controlado por Service interno + NetworkPolicy das aplicações."
 }
 
 vc::apply_network_policies() {
   local namespace="$1"
   local profile="$2"
   if (( ${VC_DISABLE_NETWORK_POLICIES:-0} )); then
-    vc::debug "VC_DISABLE_NETWORK_POLICIES=1 – pulando aplicação de CiliumNetworkPolicy em ${namespace}"
+    vc::debug "VC_DISABLE_NETWORK_POLICIES=1 – pulando políticas de host em ${namespace}"
     return 0
   fi
   if [[ "${profile}" == "private" ]]; then

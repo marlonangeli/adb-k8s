@@ -1,7 +1,7 @@
 # vCluster Toolkit
 
 Ferramentas auxiliares para criar, atualizar e remover vClusters vinculados ao
-ambiente bare-metal. Todas as automações partem da biblioteca `bin/lib.sh` e
+ambiente Kubernetes, com foco atual em OKE. Todas as automações partem da biblioteca `bin/lib.sh` e
 compartilham as mesmas variáveis exportadas pelos arquivos `env.sh` e
 `secrets.env`.
 
@@ -20,11 +20,11 @@ atividade para evitar estados intermediários.
 ## Scripts principais
 
 - `create.sh` – Cria ou atualiza um vCluster (perfil `private` ou `shared`),
-  garantindo que:
+   garantindo que:
   - o namespace host exista e esteja rotulado com as chaves de tenancy;
   - os _resource requests/limits_ sigam o perfil escolhido;
-  - as políticas de rede Cilium sejam aplicadas, restringindo o tráfego entre
-    tenants e liberando apenas os fluxos esperados;
+  - os overlays dos tenants usem rotas internas para manter APIs privadas no
+    caminho OKE;
   - o kubeconfig seja publicado em `${STATE_DIR}` e, opcionalmente, no
     namespace `monitoring` para observabilidade centralizada.
 - `remove.sh` – Faz a limpeza de um vCluster de teste, removendo o namespace
@@ -39,10 +39,10 @@ Ambos os scripts aceitam `--help` para listar opções detalhadas.
    `TENANTS` (default: `tenant-a`) e o vCluster compartilhado `shared`. O script
    cria/atualiza automaticamente:
    - os overlays Kustomize em `adb-api-3/k8s/tenants/<tenant>`;
-   - as variáveis `PUBLIC_BASE_URL`/`INTERPOLATION_BASE_URL` com base no IP
-     exposto (`api-<tenant>.<ip>.sslip.io` e `interpolation.<ip>.sslip.io`);
-   - o overlay `adb-interpolation-api/k8s/overlays/shared` com o host público
-     do processamento.
+   - as variáveis `PUBLIC_BASE_URL`/`INTERPOLATION_BASE_URL` para rotas internas
+     por padrão;
+   - o overlay `adb-interpolation-api/k8s/overlays/shared` com endpoint de
+     processamento compartilhado.
 2. Para provisionar apenas um tenant isolado:
    ```bash
    scripts/vcluster/create.sh --tenant tenant-lab --profile private
@@ -68,16 +68,13 @@ Ambos os scripts aceitam `--help` para listar opções detalhadas.
      scripts/vcluster/remove.sh --cluster tenant-lab
    ```
 
-Os scripts reutilizam o IP do Ingress (obtido via `current_ingress_ip()`) e
-herdam limites personalizados via variáveis de ambiente (ex.: exporte
+Os scripts herdam limites personalizados via variáveis de ambiente (ex.: exporte
 `PRIVATE_API_LIMIT_CPU=800m` antes de invocar `create.sh`).
 
 ## Integração com a esteira principal
 
 - `bin/90-vcluster.sh` é a etapa final de provisionamento do _cluster_ base e
   depende da conclusão das fases anteriores:
-  - `bin/40-metallb.sh` + `bin/50-ingress-nginx.sh` para disponibilizar o IP
-    virtual e a classe de ingress utilizada pelos vClusters;
   - `bin/55-cert-manager.sh`/`bin/70-observability.sh` para publicar
     certificados e disponibilizar a namespace `monitoring`, permitindo o
     espelhamento de kubeconfigs;
@@ -119,7 +116,7 @@ marcados como concluídos são ignorados. Outras opções:
 
 1. Garanta que a pasta `adb-api-3/k8s/tenants/<tenant>` exista; o script
    `create.sh` gera automaticamente `app.env`, `secrets.env` (placeholders) e
-   `ingress-patch.yaml` com os hosts apontando para o IP do vCluster.
+   `configmap-routing-patch.yaml` para reforcar rotas internas no tenant.
 2. Execute:
    ```bash
    scripts/vcluster/create.sh \

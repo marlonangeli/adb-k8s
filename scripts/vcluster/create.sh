@@ -75,9 +75,12 @@ vc::debug "Parâmetros recebidos: tenant=${tenant} cluster=${cluster} namespace=
 
 vc::ensure_namespace "${namespace}" "${tenant}" "${profile}"
 
-vcluster_host="$(vc::hostname_for_cluster "${cluster}")"
-vc::debug "Host sugerido para ${cluster}: ${vcluster_host}"
-values_file="$(vc::values_for_profile "${profile}" "${namespace}" "${cluster}" "${vcluster_host}")"
+vcluster_host=""
+if [[ "${VCLUSTER_ENABLE_INGRESS:-0}" == "1" ]]; then
+  vcluster_host="$(vc::hostname_for_cluster "${cluster}")"
+  vc::debug "Host sugerido para ${cluster}: ${vcluster_host}"
+fi
+values_file="$(vc::values_for_profile "${profile}" "${namespace}" "${vcluster_host}")"
 vc::debug "Values temporário gerado em ${values_file}"
 
 kubeconfig_tmp=$(mktemp)
@@ -86,21 +89,24 @@ existed=0
 vc::debug "Validando existência do vcluster ${cluster} em ${namespace}"
 if vcluster connect "${cluster}" -n "${namespace}" --print >"${kubeconfig_tmp}" 2>/dev/null; then
   existed=1
-  vc::debug "vcluster ${cluster} encontrado; reaproveitando kubeconfig atual"
+  vc::debug "vcluster ${cluster} encontrado; aplicando upgrade para reconciliar values"
 else
-  rm -f "${kubeconfig_tmp}"
   vc::debug "vcluster ${cluster} inexistente; iniciando criação"
-  if ! vcluster create "${cluster}" -n "${namespace}" --connect=false --expose -f "${values_file}"; then
-    vc::debug "Comando 'vcluster create' falhou para ${cluster}. Conteúdo dos values:"
-    vc::debug "$(sed 's/^/    /' "${values_file}")"
-    exit 1
-  fi
-  kubeconfig_tmp=$(mktemp)
-  register_tmp "${kubeconfig_tmp}"
-  if ! vcluster connect "${cluster}" -n "${namespace}" --print >"${kubeconfig_tmp}"; then
-    vc::debug "Falha ao conectar ao vcluster ${cluster} após criação."
-    exit 1
-  fi
+fi
+
+rm -f "${kubeconfig_tmp}"
+kubeconfig_tmp=$(mktemp)
+register_tmp "${kubeconfig_tmp}"
+
+if ! vcluster create "${cluster}" -n "${namespace}" --connect=false --expose --upgrade -f "${values_file}"; then
+  vc::debug "Comando 'vcluster create --upgrade' falhou para ${cluster}. Conteúdo dos values:"
+  vc::debug "$(sed 's/^/    /' "${values_file}")"
+  exit 1
+fi
+
+if ! vcluster connect "${cluster}" -n "${namespace}" --print >"${kubeconfig_tmp}"; then
+  vc::debug "Falha ao conectar ao vcluster ${cluster} após create/upgrade."
+  exit 1
 fi
 
 if [[ ! -s "${kubeconfig_tmp}" ]]; then

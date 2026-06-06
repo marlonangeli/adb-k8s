@@ -6,6 +6,12 @@ source "$(dirname "$0")/lib.sh"
 STEP="rancher"
 donep "${STEP}" && { log "skip ${STEP}"; exit 0; }
 
+if [[ "${PLATFORM_MODE:-baremetal}" == "oke" ]]; then
+  log "PLATFORM_MODE=oke: etapa Rancher legada desabilitada neste fluxo."
+  ok "${STEP}"
+  exit 0
+fi
+
 require_commands kubectl
 ensure_helm
 : "${RANCHER_ADMIN_PASSWORD:?defina RANCHER_ADMIN_PASSWORD em secrets.env}"
@@ -50,9 +56,10 @@ INGRESS_IP=$(current_ingress_ip) || { log "Ingress IP não conhecido. Execute pr
 
 server_version_raw=""
 server_semver=""
-if kubectl version -o json >/tmp/.kubever.json 2>/dev/null; then
-  server_version_raw=$(sed -n 's/.*"gitVersion":[[:space:]]*"\(v[^"]*\)".*/\1/p' /tmp/.kubever.json | head -n1)
-  rm -f /tmp/.kubever.json
+kubever_tmp=$(mktemp)
+register_tmp "${kubever_tmp}"
+if kubectl version -o json >"${kubever_tmp}" 2>/dev/null; then
+  server_version_raw=$(sed -n 's/.*"gitVersion":[[:space:]]*"\(v[^"]*\)".*/\1/p' "${kubever_tmp}" | head -n1)
 fi
 if [[ -z "${server_version_raw}" ]]; then
   server_version_raw=$(kubectl version 2>/dev/null | awk -F': ' '/Server Version/ {print $2; exit}')
