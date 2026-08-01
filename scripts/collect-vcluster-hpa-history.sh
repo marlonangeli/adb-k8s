@@ -32,9 +32,6 @@ Options:
   --once     Collect one sample and exit
   --daemon   Run collector in background and save PID file
 EOF
-
-  mise exec -- kubectl -n "${EXPORTER_NAMESPACE}" \
-    rollout status "deployment/${EXPORTER_DEPLOYMENT_NAME}" --timeout=90s
 }
 
 collect_mode="loop"
@@ -77,12 +74,11 @@ append_cluster_spec() {
   local namespace="$4"
   local hpa_name="$5"
 
-  if [[ -f "${kubeconfig}" ]]; then
-    cluster_specs_ref+=("${cluster}|${kubeconfig}|${namespace}|${hpa_name}")
-    return
+  if [[ ! -f "${kubeconfig}" ]]; then
+    echo "WARN: ${cluster} kubeconfig not found; collection will be incomplete: ${kubeconfig}" >&2
   fi
 
-  echo "WARN: skipping ${cluster}; kubeconfig not found: ${kubeconfig}" >&2
+  cluster_specs_ref+=("${cluster}|${kubeconfig}|${namespace}|${hpa_name}")
 }
 
 ensure_exporter_resources() {
@@ -191,6 +187,9 @@ spec:
       path: /metrics
       interval: 15s
 EOF
+
+  mise exec -- kubectl -n "${EXPORTER_NAMESPACE}" \
+    rollout status "deployment/${EXPORTER_DEPLOYMENT_NAME}" --timeout=90s
 }
 
 publish_metrics() {
@@ -381,16 +380,16 @@ with history_path.open('a', encoding='utf-8') as handle:
         reason = str(record['scalingReason']).replace('"', '\\"')
         metrics_lines.append(f'adb_vcluster_hpa_scaling_active{{{labels},reason="{reason}"}} {scaling_active}')
 
-    metrics_lines.append(f'adb_vcluster_hpa_collector_up {1 if collected_count > 0 else 0}')
+    all_clusters_collected = collected_count == len(clusters)
+    metrics_lines.append(f'adb_vcluster_hpa_collector_up {1 if all_clusters_collected else 0}')
     metrics_path.write_text('\n'.join(metrics_lines) + '\n', encoding='utf-8')
 
-    if collected_count == 0:
+    if not all_clusters_collected:
         raise SystemExit(1)
 PY
 }
 
 ensure_mise
-try_ensure_exporter_resources || true
 
 if [[ "${collect_mode}" == "daemon" ]]; then
   if [[ -f "${PID_FILE}" ]]; then
@@ -410,15 +409,11 @@ if [[ "${collect_mode}" == "daemon" ]]; then
 fi
 
 if [[ "${collect_mode}" == "once" ]]; then
-  if collect_once; then
-    trim_history || echo "WARN: failed to trim HPA history" >&2
-  else
-    echo "WARN: HPA collection failed; wrote collector_up=0" >&2
-  fi
-
-  try_ensure_exporter_resources || true
-  try_publish_metrics || true
-  exit 0
+  collect_once
+  trim_history
+  ensure_exporter_resources >/dev/null
+  publish_metrics
+  exit
 fi
 
 while true; do
@@ -428,7 +423,8 @@ while true; do
     echo "WARN: HPA collection failed; wrote collector_up=0 and will retry" >&2
   fi
 
-  try_ensure_exporter_resources || true
-  try_publish_metrics || true
+  if try_ensure_exporter_resources; then
+    try_publish_metrics || true
+  fi
   sleep "${INTERVAL_SECONDS}"
 done
