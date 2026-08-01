@@ -13,10 +13,10 @@ Keep the OKE environment stable for TCC evidence and prepare the next iteration 
 
 ### Public endpoints
 
-- Grafana -> `144.22.151.206`
-- Argo CD -> `168.138.153.100`
-- vCluster `shared` -> `147.15.124.246`
-- vCluster `abc` -> `163.176.198.222`
+- Grafana -> `<grafana-public-ip>`
+- Argo CD -> `<argocd-public-ip>`
+- vCluster `shared` -> `<shared-vcluster-public-api-ip>`
+- vCluster `abc` -> `<abc-vcluster-public-api-ip>`
 
 ### Cluster shape / cost guardrail
 

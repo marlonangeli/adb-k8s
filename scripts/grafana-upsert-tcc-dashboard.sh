@@ -5,7 +5,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 STATE_DIR="${STATE_DIR:-${ROOT_DIR}/.state/cluster-state}"
 DASHBOARD_FILE="${DASHBOARD_FILE:-${ROOT_DIR}/grafana/tcc-pod-compute-dashboard.json}"
-GRAFANA_URL="${GRAFANA_URL:-http://144.22.151.206}"
 ABC_KUBECONFIG="${ABC_KUBECONFIG:-${STATE_DIR}/kubeconfig-abc.yaml}"
 SHARED_KUBECONFIG="${SHARED_KUBECONFIG:-${STATE_DIR}/kubeconfig-shared.yaml}"
 OBS_DIR="${OBS_DIR:-${STATE_DIR}/observability}"
@@ -23,13 +22,20 @@ fi
 : "${GRAFANA_ADMIN_USER:?defina GRAFANA_ADMIN_USER em secrets.env}"
 : "${GRAFANA_ADMIN_PASSWORD:?defina GRAFANA_ADMIN_PASSWORD em secrets.env}"
 
-if [[ -n "${GRAFANA_HOSTNAME:-}" ]]; then
-  case "${GRAFANA_HOSTNAME}" in
-    *.*.*.*)
-      GRAFANA_URL="http://${GRAFANA_HOSTNAME}"
-      ;;
-  esac
+if [[ -z "${GRAFANA_URL:-}" && -n "${GRAFANA_HOSTNAME:-}" ]]; then
+  GRAFANA_URL="${GRAFANA_SCHEME:-http}://${GRAFANA_HOSTNAME}"
 fi
+
+: "${GRAFANA_URL:?defina GRAFANA_URL ou disponibilize GRAFANA_HOSTNAME em ${STATE_DIR}/dynamic.env}"
+GRAFANA_URL="${GRAFANA_URL%/}"
+
+case "${GRAFANA_URL}" in
+  http://*|https://*) ;;
+  *)
+    echo "ERROR: GRAFANA_URL must use http:// or https://" >&2
+    exit 1
+    ;;
+esac
 
 if [[ ! -f "${DASHBOARD_FILE}" ]]; then
   echo "ERROR: dashboard file not found: ${DASHBOARD_FILE}" >&2

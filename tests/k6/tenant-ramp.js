@@ -1,4 +1,6 @@
 import http from 'k6/http';
+import crypto from 'k6/crypto';
+import encoding from 'k6/encoding';
 import { check, fail, group, sleep } from 'k6';
 import {
   createHttpParams,
@@ -11,7 +13,7 @@ const baseUrl = __ENV.TENANT_API_BASE_URL;
 const targetVus = getTargetVus(50);
 const service = __ENV.K6_TARGET_SERVICE || 'tenant-api';
 const scenario = 'tenant-ramp';
-const password = __ENV.ADB_API_K6_PASSWORD || 'adb-k6-1234';
+const configuredPassword = __ENV.ADB_API_K6_PASSWORD;
 const expiresIn = __ENV.ADB_API_EXPIRES_IN || '100000';
 
 const jsonHeaders = {
@@ -40,6 +42,10 @@ if (!baseUrl) {
 }
 
 const suffix = label => `${label}-${Date.now()}-${__VU}-${__ITER}`;
+
+const generateEphemeralPassword = () => (
+  `K6-${encoding.b64encode(crypto.randomBytes(24), 'rawurl')}!aA1`
+);
 
 const parseJson = response => {
   try {
@@ -83,6 +89,7 @@ const request = (method, path, body, token, tags = {}, extra = {}) => {
 };
 
 export function setup() {
+  const password = configuredPassword || generateEphemeralPassword();
   const userSuffix = `${Date.now()}-${Math.floor(Math.random() * 100000)}`;
   const email = `k6+${userSuffix}@adb.com`;
   const personPayload = {

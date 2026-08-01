@@ -1,6 +1,6 @@
 ## Plataforma K8s (OKE + legado bare-metal)
 
-> Ambiente alvo: **Debian 12**, acesso SSH permitido **apenas** para `utfpr`. Conecte via `ssh utfpr@200.134.18.55 -p 22252`, em cada nó execute `su -` e só então rode os scripts como root.
+> Ambiente alvo: **Debian 12**, acesso SSH permitido **apenas** para `utfpr`. Conecte via `ssh utfpr@<bare-metal-ssh-host> -p <ssh-port>`, em cada nó execute `su -` e só então rode os scripts como root.
 
 ## OKE quick start (current path)
 

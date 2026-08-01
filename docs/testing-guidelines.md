@@ -28,11 +28,11 @@ provisionado com vClusters, Argo CD e observabilidade compartilhada.
 ## Estado operacional atual para testes (2026-04)
 
 - Endpoints públicos disponíveis para evidência:
-  - Grafana -> `http://144.22.151.206`
-  - Argo CD -> `http://168.138.153.100`
+  - Grafana -> `<grafana-public-url>`
+  - Argo CD -> `<argocd-public-url>`
 - vClusters acessíveis por kubeconfig público:
-  - `shared` -> `147.15.124.246`
-  - `abc` -> `163.176.198.222`
+  - `shared` -> `<shared-vcluster-api-endpoint>`
+  - `abc` -> `<abc-vcluster-api-endpoint>`
 - Estado base antes de iniciar carga:
   - `shared-interpolation` -> `Synced / Healthy`
   - `tenant-abc-adb-api` -> `Synced / Healthy`

@@ -51,7 +51,11 @@ gera evidências melhores para o TCC.
 - `tenant-smoke.js`: validação básica da API de dados por tenant usando
   `GET /input/hi` e status `200`.
 - `tenant-ramp.js`: cenário de rampa com bootstrap real (`POST /person` +
-  `POST /auth`) e CRUD autenticado leve de `company` e `employee`.
+  `POST /auth`) e CRUD autenticado leve de `company` e `employee`. A cada
+  execução, o `setup()` gera uma senha efêmera criptograficamente aleatória
+  para o usuário temporário; portanto, o Job não precisa receber uma senha.
+  Quando necessário para depuração ou compatibilidade, defina opcionalmente
+  `ADB_API_K6_PASSWORD` no ambiente do k6 para substituir a senha gerada.
 - `shared-interpolation.js`: cenário principal de **balanceamento real** usando
   `Connection: close` + métricas por `hostname` retornado em `/healthz`.
 - `shared-interpolation/escalabilidade.js`: rampa de VUs da API compartilhada,

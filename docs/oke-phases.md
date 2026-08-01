@@ -102,11 +102,11 @@ make preflight-oke
 
 ### Public endpoints validated
 
-- Grafana -> `144.22.151.206`
-- Argo CD -> `168.138.153.100`
-- vCluster `shared` -> `147.15.124.246`
-- vCluster `abc` -> `163.176.198.222`
-- vCluster `xyz` -> `64.181.184.95`
+- Grafana -> `<grafana-public-ip>`
+- Argo CD -> `<argocd-public-ip>`
+- vCluster `shared` -> `<shared-vcluster-public-api-ip>`
+- vCluster `abc` -> `<abc-vcluster-public-api-ip>`
+- vCluster `xyz` -> `<xyz-vcluster-public-api-ip>`
 
 ### Recovery notes captured in this phase
 

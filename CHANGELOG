@@ -1,5 +1,9 @@
 # Changelog
 
+## 2026-07-31
+- Sanitizados endpoints públicos e exemplos operacionais versionados; arquivos `.env` locais agora são ignorados sem ocultar modelos `.env.example`.
+- O teste de rampa k6 agora gera uma senha efêmera forte por execução e aceita `ADB_API_K6_PASSWORD` apenas como override opcional; o upsert do dashboard Grafana exige `GRAFANA_URL` ou usa `GRAFANA_HOSTNAME` descoberto em `${STATE_DIR}/dynamic.env`, sem fallbacks sensíveis fixos.
+
 ## 2026-05-17
 - Cenários k6 algorítmicos da interpolação compartilhada passaram a definir `timeout` HTTP explícito por requisição, evitando falhas pelo default de 60s em rotas Rscript mais longas sem alterar VUs, duração ou thresholds.
 
