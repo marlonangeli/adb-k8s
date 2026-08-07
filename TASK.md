@@ -10,15 +10,13 @@ Keep the OKE environment stable for TCC evidence and prepare the next iteration 
 
 - `shared-interpolation` -> `Synced / Healthy`
 - `tenant-abc-adb-api` -> `Synced / Healthy`
-- `tenant-xyz-adb-api` -> `Synced / Healthy`
 
 ### Public endpoints
 
-- Grafana -> `144.22.151.206`
-- Argo CD -> `168.138.153.100`
-- vCluster `shared` -> `147.15.124.246`
-- vCluster `abc` -> `163.176.198.222`
-- vCluster `xyz` -> `64.181.184.95`
+- Grafana -> `<grafana-public-ip>`
+- Argo CD -> `<argocd-public-ip>`
+- vCluster `shared` -> `<shared-vcluster-public-api-ip>`
+- vCluster `abc` -> `<abc-vcluster-public-api-ip>`
 
 ### Cluster shape / cost guardrail
 
@@ -37,7 +35,7 @@ Keep the OKE environment stable for TCC evidence and prepare the next iteration 
 ### Public access / control plane
 
 - Grafana and Argo CD were reprovisioned to public LoadBalancers.
-- vClusters `shared`, `abc`, and `xyz` were moved to public endpoints.
+- vClusters `shared` and `abc` were moved to public endpoints.
 - kubeconfigs under `.state/cluster-state/` were updated to public server URLs.
 - Argo CD cluster secrets were rewritten to use:
   - `caData`
@@ -95,7 +93,6 @@ source ./secrets.env
 
 mise exec -- kubectl -n argocd get applications -A
 mise exec -- kubectl --kubeconfig .state/cluster-state/kubeconfig-abc.yaml -n app get pods
-mise exec -- kubectl --kubeconfig .state/cluster-state/kubeconfig-xyz.yaml -n app get pods
 mise exec -- kubectl --kubeconfig .state/cluster-state/kubeconfig-shared.yaml -n processing get pods
 ```
 
@@ -117,7 +114,6 @@ source ./env.sh
 source ./secrets.env
 
 mise exec -- kubectl --kubeconfig .state/cluster-state/kubeconfig-abc.yaml get ns
-mise exec -- kubectl --kubeconfig .state/cluster-state/kubeconfig-xyz.yaml get ns
 mise exec -- kubectl --kubeconfig .state/cluster-state/kubeconfig-shared.yaml get ns
 ```
 

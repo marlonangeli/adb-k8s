@@ -16,6 +16,7 @@ const interpolationUrl = __ENV.INTERPOLATION_BASE_URL;
 const service = __ENV.K6_TARGET_SERVICE || "adb-interpolation-api";
 const scenario = "shared-isi-geostatistics";
 const endpoint = "/isi/geostatistics";
+const requestTimeout = __ENV.K6_HTTP_TIMEOUT || "300s";
 
 export const options = {
   systemTags: ["status", "method", "name", "group", "check", "scenario", "expected_response"],
@@ -44,6 +45,7 @@ export default function () {
       },
       responseCallback: createRscriptResponseCallback(),
       tags: createEndpointTags("POST", endpoint),
+      timeout: requestTimeout,
     })
   );
 

@@ -28,7 +28,7 @@ Usage:
 Example:
   ./oci-bastion-forward.sh \
     --bastion-id ocid1.bastion.oc1.sa-saopaulo-1... \
-    --target-ip 10.127.82.122 \
+    --target-ip <private-service-ip> \
     --target-port 80 \
     --local-port 8080
 EOF

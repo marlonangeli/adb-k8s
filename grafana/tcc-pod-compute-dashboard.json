@@ -29,7 +29,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "cores"
         },
@@ -78,7 +78,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "bytes"
         },
@@ -189,7 +189,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "cores"
         },
@@ -238,7 +238,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "bytes"
         },
@@ -312,7 +312,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "binBps"
         },
@@ -361,7 +361,7 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "binBps"
         },
@@ -417,11 +417,72 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "short"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* current$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* desired$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "blue",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* min$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "gray",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* max$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "red",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -442,8 +503,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_current_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} current",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_current_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} current",
           "range": true,
           "refId": "A"
         },
@@ -453,8 +514,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_desired_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} desired",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_desired_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} desired",
           "range": true,
           "refId": "B"
         },
@@ -464,8 +525,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_min_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} min",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_min_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} min",
           "range": true,
           "refId": "C"
         },
@@ -475,8 +536,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_max_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} max",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_max_replicas{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} max",
           "range": true,
           "refId": "D"
         }
@@ -499,11 +560,42 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "percent"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* cpu current$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* cpu target$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -524,8 +616,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_cpu_utilization_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} cpu current",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_cpu_utilization_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} cpu current",
           "range": true,
           "refId": "A"
         },
@@ -535,8 +627,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_cpu_target_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} cpu target",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_cpu_target_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} cpu target",
           "range": true,
           "refId": "B"
         }
@@ -559,11 +651,42 @@
       "fieldConfig": {
         "defaults": {
           "color": {
-            "mode": "palette-classic"
+            "mode": "palette-classic-by-name"
           },
           "unit": "percent"
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* memory current$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "green",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": ".* memory target$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "fixedColor": "orange",
+                  "mode": "fixed"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "legend": {
@@ -584,8 +707,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_memory_utilization_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} memory current",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_memory_utilization_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} memory current",
           "range": true,
           "refId": "A"
         },
@@ -595,8 +718,8 @@
             "uid": "${datasource}"
           },
           "editorMode": "code",
-          "expr": "adb_vcluster_hpa_memory_target_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"}",
-          "legendFormat": "{{cluster}}/{{exported_namespace}} memory target",
+          "expr": "max by (cluster, exported_namespace, hpa) (adb_vcluster_hpa_memory_target_percent{cluster=~\"$hpa_cluster\", exported_namespace=~\"$hpa_namespace\", hpa=~\"$hpa_name\"})",
+          "legendFormat": "{{cluster}}/{{exported_namespace}}/{{hpa}} memory target",
           "range": true,
           "refId": "B"
         }

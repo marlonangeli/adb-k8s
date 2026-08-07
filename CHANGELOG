@@ -1,5 +1,17 @@
 # Changelog
 
+## 2026-07-31
+- Sanitizados endpoints públicos e exemplos operacionais versionados; arquivos `.env` locais agora são ignorados sem ocultar modelos `.env.example`.
+- O teste de rampa k6 agora gera uma senha efêmera forte por execução e aceita `ADB_API_K6_PASSWORD` apenas como override opcional; o upsert do dashboard Grafana exige `GRAFANA_URL` ou usa `GRAFANA_HOSTNAME` descoberto em `${STATE_DIR}/dynamic.env`, sem fallbacks sensíveis fixos.
+
+## 2026-05-17
+- Cenários k6 algorítmicos da interpolação compartilhada passaram a definir `timeout` HTTP explícito por requisição, evitando falhas pelo default de 60s em rotas Rscript mais longas sem alterar VUs, duração ou thresholds.
+
+## 2026-05-14
+- Dashboard Grafana do TCC passou a usar cores estáveis por nome de série e overrides semânticos para HPA (`current`, `desired`, `min`, `max`, `target`), além de agregar métricas por `cluster/exported_namespace/hpa` para evitar duplicação durante rollouts do exporter.
+- Coletor/exporter de HPA agora publica métricas via `emptyDir` no pod, aguarda rollout antes de publicar e remove o label customizado `namespace` para evitar conflito com labels do Prometheus.
+- Documentado o fluxo local para pausar/restaurar a sincronização automática do Argo CD durante evidências k6 de escalabilidade da API compartilhada.
+
 ## 2026-05-06
 - Testes k6 foram preparados para execução **in-cluster** via `grafana/k6:1.7.1`, com runner Kubernetes reutilizável (`scripts/k6-run-incluster.sh`, `manifests/k6/k6-runner-job.yaml`) e cenários atualizados para usar métricas customizadas, summaries padronizados e URLs reais de Services internos.
 - Adicionados `mise tasks` para baseline, balanceamento da interpolação compartilhada e smoke/ramp por tenant, reduzindo o uso de `localhost`/`port-forward` como caminho principal de validação.
